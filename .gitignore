@@ -25,8 +25,6 @@ server/data/db.json
 
 # Hosting docs that contain passwords / account secrets
 styleArz-server.pdf
-*server*credential*
-*cpanel*
 
 # Editor / OS
 .idea/

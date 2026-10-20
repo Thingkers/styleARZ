@@ -1,0 +1,58 @@
+StyleARZ deployment notes (cPanel / Namecheap StellarPlus)
+==========================================================
+
+Host: premium115.web-hosting.com
+Domain: stylearz.com
+Home directory: /home/stylvrey
+Document / app root for Node: typically /home/stylvrey/stylearz or the
+"Application root" chosen in Setup Node.js App.
+
+SECURITY
+- The password printed in styleArz-server.pdf must be rotated in cPanel.
+- Never commit .env or cPanel credentials.
+- Create .env on the server only (File Manager or SSH), from .env.example:
+    PORT=<port assigned by Setup Node.js App>
+    JWT_SECRET=<long random string>
+    NODE_ENV=production
+
+LOCAL BUILD
+  npm install
+  npm run build
+  # emits static assets into server/public/
+
+UPLOAD (FTP or File Manager)
+  app.js
+  package.json
+  package-lock.json (after npm install locally)
+  server/   (includes public/ after build, src/, and empty data/)
+  .env      (create on server; do not upload from a shared machine carelessly)
+
+Do NOT upload:
+  client/src (optional; build already compiled)
+  node_modules (install on server)
+  .env from development if JWT_SECRET is weak
+  styleArz-server.pdf
+
+CPANEL — Setup Node.js App
+  1. Software → Setup Node.js App → Create
+  2. Node version: 18+ or 20+
+  3. Application mode: Production
+  4. Application root: folder where app.js lives (e.g. stylearz)
+  5. Application URL: stylearz.com (or subdomain)
+  6. Application startup file: app.js
+  7. Add environment variables: PORT (auto), JWT_SECRET, NODE_ENV=production
+  8. Run NPM Install in the UI (or SSH: npm install --omit=dev)
+  9. Ensure npm run build was done before upload (or run it if build tools exist)
+  10. Start / Restart the app
+
+If Node.js App is unavailable on the plan, ask hosting support to enable it,
+or use a VPS. Static-only hosting cannot run the Express API.
+
+SSL
+  Issue a free SSL certificate in cPanel (domain currently flagged inactive
+  in the PDF snapshot). Force HTTPS after the cert is active.
+
+Demo accounts (seeded on first boot when server/data/db.json is missing)
+  Customer: farhan@stylearz.com
+  Admin:    admin@stylearz.com
+  Password for both is in seed.js (change after go-live).
