@@ -1,0 +1,35 @@
+# Dependencies & build
+node_modules/
+server/public/
+dist/
+.shots/
+*.log
+npm-debug.log*
+.DS_Store
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+credentials.json
+*.pem
+*.ppk
+id_rsa
+id_ed25519
+*_rsa
+*_ed25519
+*.key
+
+# Runtime data
+server/data/db.json
+
+# Hosting docs that contain passwords / account secrets
+styleArz-server.pdf
+*server*credential*
+*cpanel*
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~

@@ -1,0 +1,27 @@
+{
+  "name": "stylearz",
+  "private": true,
+  "version": "1.0.0",
+  "description": "StyleARZ — fashion portal. React storefront and Node API.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c dim,magenta \"node server/src/index.js\" \"vite --config client/vite.config.js\"",
+    "build": "vite build --config client/vite.config.js",
+    "start": "NODE_ENV=production node app.js",
+    "seed:reset": "rm -f server/data/db.json && node -e \"require('./server/src/store').load()\""
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.1",
+    "vite": "^6.0.7"
+  }
+}
