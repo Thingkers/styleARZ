@@ -1,58 +1,42 @@
-StyleARZ deployment notes (cPanel / Namecheap StellarPlus)
-==========================================================
+StyleARZ deployment notes (cPanel / Namecheap)
+==============================================
 
-Host: premium115.web-hosting.com
-Domain: stylearz.com
-Home directory: /home/stylvrey
-Document / app root for Node: typically /home/stylvrey/stylearz or the
-"Application root" chosen in Setup Node.js App.
+Full guide: deploy/GUIDE.md
+
+Domain:     stylearz.com
+cPanel:     https://stylearz.com:2083/
+            (fallback: https://premium115.web-hosting.com:2083)
+User:       stylvrey
+SSH:        premium115.web-hosting.com port 21098
+App root:   /home/stylvrey/stylearz
+Startup:    app.js
 
 SECURITY
-- The password printed in styleArz-server.pdf must be rotated in cPanel.
-- Never commit .env or cPanel credentials.
-- Create .env on the server only (File Manager or SSH), from .env.example:
-    PORT=<port assigned by Setup Node.js App>
-    JWT_SECRET=<long random string>
-    NODE_ENV=production
+- Rotate any password that appeared in styleArz-server.pdf.
+- Never commit .env, credentials.json, or SSH private keys.
+- Server .env: PORT (from Node selector), JWT_SECRET, NODE_ENV=production
 
-LOCAL BUILD
-  npm install
-  npm run build
-  # emits static assets into server/public/
-
-UPLOAD (FTP or File Manager)
-  app.js
-  package.json
-  package-lock.json (after npm install locally)
-  server/   (includes public/ after build, src/, and empty data/)
-  .env      (create on server; do not upload from a shared machine carelessly)
-
-Do NOT upload:
-  client/src (optional; build already compiled)
-  node_modules (install on server)
-  .env from development if JWT_SECRET is weak
-  styleArz-server.pdf
+LOCAL → DEPLOY
+  npm install && npm run build
+  bash scripts/deploy-ssh.sh
+  cPanel → Setup Node.js App → Run NPM Install (if deps changed) → Restart
 
 CPANEL — Setup Node.js App
   1. Software → Setup Node.js App → Create
-  2. Node version: 18+ or 20+
-  3. Application mode: Production
-  4. Application root: folder where app.js lives (e.g. stylearz)
-  5. Application URL: stylearz.com (or subdomain)
-  6. Application startup file: app.js
-  7. Add environment variables: PORT (auto), JWT_SECRET, NODE_ENV=production
-  8. Run NPM Install in the UI (or SSH: npm install --omit=dev)
-  9. Ensure npm run build was done before upload (or run it if build tools exist)
-  10. Start / Restart the app
+  2. Node 18+ / Production
+  3. Application root: stylearz
+  4. Application URL: stylearz.com
+  5. Startup file: app.js
+  6. Env: NODE_ENV=production, JWT_SECRET
+  7. Run NPM Install in the UI (do not npm install over SSH into app root)
+  8. Start / Restart
 
-If Node.js App is unavailable on the plan, ask hosting support to enable it,
-or use a VPS. Static-only hosting cannot run the Express API.
+CloudLinux: app root must not contain a real node_modules directory
+(only the selector symlink).
 
 SSL
-  Issue a free SSL certificate in cPanel (domain currently flagged inactive
-  in the PDF snapshot). Force HTTPS after the cert is active.
+  SSL/TLS Status → issue free cert for stylearz.com → force HTTPS
 
-Demo accounts (seeded on first boot when server/data/db.json is missing)
-  Customer: farhan@stylearz.com
-  Admin:    admin@stylearz.com
-  Password for both is in seed.js (change after go-live).
+Demo accounts (seed) — change after go-live
+  farhan@stylearz.com / style123
+  admin@stylearz.com  / style123
