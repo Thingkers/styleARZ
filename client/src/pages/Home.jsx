@@ -8,6 +8,7 @@ import { Loading } from "../components/ui";
 export default function Home() {
   useDocumentTitle("");
   const [products, setProducts] = useState([]);
+  const [collections, setCollections] = useState([]);
   const [looks, setLooks] = useState([]);
   const [posts, setPosts] = useState([]);
   const [quiz, setQuiz] = useState(null);
@@ -22,9 +23,15 @@ export default function Home() {
         localStorage.removeItem("sa-quiz");
       }
     }
-    Promise.all([api("/api/products?featured=1"), api("/api/looks"), api("/api/community")])
-      .then(([productData, lookData, postData]) => {
+    Promise.all([
+      api("/api/products?featured=1"),
+      api("/api/home-collections"),
+      api("/api/looks"),
+      api("/api/community"),
+    ])
+      .then(([productData, collectionData, lookData, postData]) => {
         setProducts(productData.products);
+        setCollections(collectionData.collections || []);
         setLooks(lookData.looks);
         setPosts(postData.posts.slice(0, 3));
       })
@@ -39,7 +46,7 @@ export default function Home() {
           <span className="hero-pane hero-pane-arz" />
         </div>
         <div className="hero-copy">
-          <span className="logo-lockup hero-lockup">
+          <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
             <span className="logo-style">STYLE</span>
             <span className="logo-arz">ARZ</span>
           </span>
@@ -68,27 +75,15 @@ export default function Home() {
       </ul>
 
       <section className="wrap collections">
-        <Link to="/shop?audience=Men" className="collection-card">
-          <img src="/images/look-weekend.jpg" alt="Men's export casuals" />
-          <div>
-            <p className="kicker">Men</p>
-            <strong>Polos, shirts, chinos</strong>
-          </div>
-        </Link>
-        <Link to="/shop?audience=Women" className="collection-card">
-          <img src="/images/look-women-day.jpg" alt="Women's export casuals" />
-          <div>
-            <p className="kicker">Women</p>
-            <strong>Blouses, easy dresses, knits</strong>
-          </div>
-        </Link>
-        <Link to="/shop?audience=Children" className="collection-card">
-          <img src="/images/look-children.jpg" alt="Children's export casuals" />
-          <div>
-            <p className="kicker">Children</p>
-            <strong>Same Grade A, ages 2–12</strong>
-          </div>
-        </Link>
+        {collections.map((entry) => (
+          <Link key={entry.id} to={`/shop?audience=${encodeURIComponent(entry.audience)}`} className="collection-card">
+            <img src={entry.image} alt={`${entry.kicker} export casuals`} />
+            <div>
+              <p className="kicker">{entry.kicker}</p>
+              <strong>{entry.title}</strong>
+            </div>
+          </Link>
+        ))}
       </section>
 
       {quiz?.result && (

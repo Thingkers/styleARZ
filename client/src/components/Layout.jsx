@@ -19,6 +19,7 @@ export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const { cart, count, subtotal, drawer, setDrawer, updateQty, removeFromCart, toast } = useShop();
   const [menu, setMenu] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [unread, setUnread] = useState(0);
   const [scrolled, setScrolled] = useState(false);
@@ -27,9 +28,26 @@ export default function Layout({ children }) {
 
   useEffect(() => {
     setMenu(false);
+    setAccountOpen(false);
     setDrawer(false);
     window.scrollTo(0, 0);
   }, [location.pathname, setDrawer]);
+
+  useEffect(() => {
+    if (!accountOpen) return undefined;
+    function onPointer(event) {
+      if (!event.target.closest?.(".account-menu")) setAccountOpen(false);
+    }
+    function onKey(event) {
+      if (event.key === "Escape") setAccountOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [accountOpen]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -74,8 +92,11 @@ export default function Layout({ children }) {
             aria-expanded={menu}
             onClick={() => setMenu((open) => !open)}
           >
-            <span />
-            <span />
+            <span className="nav-toggle-bars" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
           </button>
 
           <Logo />
@@ -119,15 +140,81 @@ export default function Layout({ children }) {
                 {unread > 0 && <em>{unread}</em>}
               </Link>
             )}
-            <Link to={user ? "/profile" : "/login"} className="action-chip">
-              {user ? user.name.split(" ")[0] : "Sign in"}
-            </Link>
+            {user ? (
+              <div className={`account-menu ${accountOpen ? "is-open" : ""}`}>
+                <button
+                  type="button"
+                  className="account-trigger"
+                  aria-label={`Account menu for ${user.name}`}
+                  aria-expanded={accountOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setAccountOpen((open) => !open)}
+                >
+                  <span className="account-avatar" aria-hidden>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <circle cx="12" cy="8" r="3.2" />
+                      <path d="M5.5 19.2c1.6-3.1 4-4.6 6.5-4.6s4.9 1.5 6.5 4.6" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                </button>
+                {accountOpen && (
+                  <div className="account-dropdown" role="menu">
+                    <p className="account-dropdown-name">{user.name}</p>
+                    <p className="account-dropdown-email">{user.email}</p>
+                    <Link role="menuitem" to="/profile" onClick={() => setAccountOpen(false)}>
+                      Profile
+                    </Link>
+                    {user.role === "admin" && (
+                      <Link role="menuitem" to="/admin" onClick={() => setAccountOpen(false)}>
+                        Admin
+                      </Link>
+                    )}
+                    <Link role="menuitem" to="/wishlist" onClick={() => setAccountOpen(false)}>
+                      Wishlist
+                    </Link>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="account-logout"
+                      onClick={() => {
+                        setAccountOpen(false);
+                        logout();
+                        navigate("/");
+                      }}
+                    >
+                      Log out
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link to="/login" className="account-trigger account-trigger-link" aria-label="Sign in">
+                <span className="account-avatar" aria-hidden>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="12" cy="8" r="3.2" />
+                    <path d="M5.5 19.2c1.6-3.1 4-4.6 6.5-4.6s4.9 1.5 6.5 4.6" strokeLinecap="round" />
+                  </svg>
+                </span>
+              </Link>
+            )}
             <Link to="/wishlist" className="action-chip hide-sm">
               Saved
             </Link>
-            <button type="button" className="action-chip bag" onClick={() => setDrawer(true)}>
+            <button type="button" className="action-chip bag bag-desktop" onClick={() => setDrawer(true)}>
               Bag
               <em>{count}</em>
+            </button>
+            <button
+              type="button"
+              className="bag-mobile"
+              onClick={() => setDrawer(true)}
+              aria-label={`Bag, ${count} items`}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                <path d="M6 8h12l-1 12H7L6 8z" strokeLinejoin="round" />
+                <path d="M9 8V7a3 3 0 0 1 6 0v1" strokeLinecap="round" />
+              </svg>
+              {count > 0 && <em>{count}</em>}
             </button>
           </div>
         </div>

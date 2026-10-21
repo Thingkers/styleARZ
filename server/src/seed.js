@@ -1,4 +1,5 @@
 const { hashPassword } = require("./auth");
+const { makeBarcode } = require("./barcode");
 
 function daysAgo(n) {
   const d = new Date();
@@ -18,18 +19,42 @@ const MEN = ["S", "M", "L", "XL", "XXL"];
 const WOMEN = ["XS", "S", "M", "L", "XL"];
 const CHILD = ["2-3Y", "4-5Y", "6-7Y", "8-9Y", "10-12Y"];
 
+let pieceOrder = 0;
+
 function piece(data) {
+  const sortOrder = pieceOrder++;
   return {
     stock: 12,
     featured: false,
     grade: "A",
     sizes: MEN,
     occasions: ["Everyday"],
+    sortOrder,
     ...data,
   };
 }
 
+function retailItem(seq, data) {
+  const stamp = daysAgo(10);
+  return {
+    color: "",
+    size: "",
+    category: "",
+    cost: 0,
+    stock: 0,
+    image: "",
+    notes: "",
+    createdAt: stamp,
+    updatedAt: stamp,
+    version: 1,
+    ...data,
+    id: `inv_seed${seq}`,
+    barcode: makeBarcode(seq),
+  };
+}
+
 function buildSeed() {
+  pieceOrder = 0;
   const clientPass = hashPassword("style123");
   const adminPass = hashPassword("style123");
 
@@ -374,6 +399,75 @@ function buildSeed() {
     },
   ];
 
+  const inventoryItems = [
+    retailItem(1001, {
+      sku: "SA-OXF-WHT-M",
+      name: "Casual Export Oxford",
+      color: "White",
+      size: "M",
+      category: "Shirts",
+      price: 2450,
+      cost: 1480,
+      stock: 18,
+      notes: "Shop-floor Grade A oxford.",
+    }),
+    retailItem(1002, {
+      sku: "SA-POL-NVY-L",
+      name: "Export Pique Polo",
+      color: "Navy",
+      size: "L",
+      category: "Knitwear",
+      price: 1650,
+      cost: 960,
+      stock: 24,
+    }),
+    retailItem(1003, {
+      sku: "SA-CHN-SND-32",
+      name: "Garment-Wash Chino",
+      color: "Sand",
+      size: "32",
+      category: "Trousers",
+      price: 2200,
+      cost: 1310,
+      stock: 12,
+    }),
+    retailItem(1004, {
+      sku: "SA-SCF-RST-OS",
+      name: "Accent Knit Scarf",
+      color: "Rust",
+      size: "One",
+      category: "Accessories",
+      price: 950,
+      cost: 520,
+      stock: 3,
+      notes: "Low stock sample.",
+    }),
+  ];
+
+  const homeCollections = [
+    {
+      id: "men",
+      audience: "Men",
+      kicker: "Men",
+      title: "Polos, shirts, chinos",
+      image: "/images/look-weekend.jpg",
+    },
+    {
+      id: "women",
+      audience: "Women",
+      kicker: "Women",
+      title: "Blouses, easy dresses, knits",
+      image: "/images/look-women-day.jpg",
+    },
+    {
+      id: "children",
+      audience: "Children",
+      kicker: "Children",
+      title: "Same Grade A, ages 2–12",
+      image: "/images/look-children.jpg",
+    },
+  ];
+
   return {
     users: [
       {
@@ -399,6 +493,14 @@ function buildSeed() {
     ],
     products,
     looks,
+    homeCollections,
+    inventoryItems,
+    inventorySeq: 1004,
+    inventoryDeleted: [],
+    inventoryCategories: ["Shirts", "Knitwear", "Trousers", "Outerwear", "Dresses", "Sets", "Accessories"],
+    posSessions: [],
+    posScanEvents: [],
+    posSales: [],
     orders: [
       {
         id: "SA-18420",

@@ -1,8 +1,10 @@
 # StyleARZ — complete guide (local + cPanel + Git)
 
-Private repo: https://github.com/Thingkers/styleARZ  
+Repo: https://github.com/Thingkers/styleARZ  
 Live site: https://stylearz.com  
 cPanel: https://stylearz.com:2083/
+
+Shorter onboarding for new teammates: [docs/TEAM-ONBOARDING.md](../docs/TEAM-ONBOARDING.md) · [README.md](../README.md)
 
 ---
 
@@ -10,8 +12,8 @@ cPanel: https://stylearz.com:2083/
 
 | What | Value |
 |------|--------|
-| GitHub org / repo | `Thingkers/styleARZ` (private) |
-| GitHub login for this project | Thingkers org members (e.g. `Thingkers-Intelligence`) |
+| GitHub org / repo | `Thingkers/styleARZ` |
+| GitHub login for this project | A Thingkers org member or collaborator |
 | cPanel URL | https://stylearz.com:2083/ |
 | cPanel username | `stylvrey` |
 | cPanel password | **vault only** — never commit |
@@ -266,7 +268,25 @@ Send them this file (`deploy/GUIDE.md`) plus vault access for cPanel/SSH.
 
 ---
 
-## 9. Troubleshooting
+## 9. Retail inventory & POS (admin)
+
+Separate from the online shop catalog. Sign in as admin.
+
+| Path | Purpose |
+|------|---------|
+| `/admin/inventory` | Retail stock list; add/edit with phone photo |
+| `/admin/barcodes` | Print Code128 labels |
+| `/admin/pos-sales` | In-store sales history |
+| `/pos` | Register (Solo = Scan/Cart/Pay on one phone; Dual = counter + remote scanner) |
+| `/pos/scan` | Phone scanner for Dual (online code, or Offline WebRTC paste) |
+
+Offline Solo sales queue in the browser and sync when the network returns. Dual offline uses WebRTC offer/answer paste between counter and phone (no Bluetooth hardware).
+
+Deploy preserves `server/data/` and `server/uploads/` on the host (rsync protect filters).
+
+---
+
+## 10. Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
@@ -276,3 +296,5 @@ Send them this file (`deploy/GUIDE.md`) plus vault access for cPanel/SSH.
 | Site up but API 404 / blank | Confirm Application root is `stylearz`, startup `app.js`, app **Running**, and `server/public/` was built |
 | SSL warning in browser | Issue cert in SSL/TLS Status; wait for propagation; force HTTPS |
 | Wrong GitHub user when pushing | `gh auth switch` → choose Thingkers account; confirm `git remote -v` is `Thingkers/styleARZ` |
+| POS camera blocked | Use HTTPS (or localhost); allow camera permission; Solo mode still accepts manual barcode entry |
+| Uploaded item photos 404 after deploy | Confirm `server/uploads/` exists on the host and was not wiped; redeploy uses protect filters for uploads |

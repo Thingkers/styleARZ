@@ -3,6 +3,9 @@ node_modules/
 server/public/
 dist/
 .shots/
+marketing/fb-demo/.venv/
+marketing/fb-demo/audio/
+marketing/fb-demo/out/
 *.log
 npm-debug.log*
 .DS_Store
@@ -22,6 +25,7 @@ id_ed25519
 
 # Runtime data
 server/data/db.json
+server/uploads/
 
 # Hosting docs that contain passwords / account secrets
 styleArz-server.pdf

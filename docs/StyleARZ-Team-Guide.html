@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>StyleARZ — Team Guide</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+      color: #1a1a1a;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 22pt; margin: 0 0 6px; letter-spacing: -0.02em; }
+    h2 {
+      font-size: 13pt;
+      margin: 22px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1.5px solid #222;
+    }
+    h3 { font-size: 11.5pt; margin: 14px 0 6px; }
+    p, li { margin: 0 0 6px; }
+    ul, ol { padding-left: 1.2em; margin: 0 0 10px; }
+    .meta {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 4px 12px;
+      margin: 12px 0 18px;
+      font-size: 10.5pt;
+    }
+    .meta strong { color: #111; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 14px;
+      font-size: 10pt;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f2f2f2; font-weight: 600; }
+    pre {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-size: 9.5pt;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      margin: 8px 0 14px;
+    }
+    code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.5pt; }
+    .warn {
+      background: #fff1f0;
+      border-left: 3px solid #c0392b;
+      padding: 8px 12px;
+      margin: 12px 0;
+      font-size: 10pt;
+    }
+    .footer {
+      margin-top: 28px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+      font-size: 9pt;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>StyleARZ — Team Guide</h1>
+
+  <div class="meta">
+    <strong>GitHub</strong><span>https://github.com/Thingkers/styleARZ</span>
+    <strong>Live site</strong><span>https://stylearz.com</span>
+    <strong>cPanel</strong><span>https://stylearz.com:2083/</span>
+    <strong>Stack</strong><span>React 18, Vite, Express · Node.js 18+</span>
+  </div>
+
+  <h2>1. Get the code &amp; run locally</h2>
+  <p>Requires Node.js 18+ (<code>node -v</code>).</p>
+  <pre>git clone https://github.com/Thingkers/styleARZ.git
+cd styleARZ
+npm install
+cp .env.example .env
+npm run dev</pre>
+  <p>Open <strong>http://127.0.0.1:5173</strong> (API on port 4000; Vite proxies <code>/api</code>).</p>
+
+  <table>
+    <tr><th>Role</th><th>Email</th><th>Login</th></tr>
+    <tr><td>Customer</td><td>farhan@stylearz.com</td><td>style123</td></tr>
+    <tr><td>Admin</td><td>admin@stylearz.com</td><td>style123</td></tr>
+  </table>
+  <p>Reset local DB: <code>npm run seed:reset</code> · Stop: <code>Ctrl+C</code></p>
+
+  <h2>2. Day-to-day git</h2>
+  <pre>git pull origin main
+npm run dev
+# edit files under client/ or server/
+git add -A
+git commit -m "Why you changed it"
+git push origin main</pre>
+
+  <h2>3. Project layout</h2>
+  <pre>styleARZ/
+├── client/           React (Vite) storefront
+├── server/           Express API + seed data
+│   └── public/       Built frontend (after npm run build)
+├── app.js            Production entry (cPanel startup)
+├── scripts/deploy-ssh.sh
+├── deploy/GUIDE.md   Full hosting guide in repo
+├── credentials.example.json
+└── .env.example</pre>
+
+  <h2>4. Hosting access</h2>
+  <table>
+    <tr><th>Item</th><th>Value</th></tr>
+    <tr><td>cPanel</td><td>https://stylearz.com:2083/</td></tr>
+    <tr><td>cPanel user</td><td>stylvrey</td></tr>
+    <tr><td>SSH host</td><td>premium115.web-hosting.com</td></tr>
+    <tr><td>SSH port</td><td>21098 (not 22)</td></tr>
+    <tr><td>SSH user</td><td>stylvrey</td></tr>
+    <tr><td>App directory</td><td>/home/stylvrey/stylearz</td></tr>
+    <tr><td>Startup file</td><td>app.js</td></tr>
+  </table>
+
+  <h3>SSH (once per teammate)</h3>
+  <ol>
+    <li>Log in to cPanel → <strong>SSH Access → Manage SSH Keys</strong></li>
+    <li>Import/generate a key → <strong>Authorize</strong> the public key</li>
+    <li>Keep the private key locally (e.g. <code>~/.ssh/stylearz_deploy</code>)</li>
+    <li>Test:</li>
+  </ol>
+  <pre>ssh -p 21098 -i ~/.ssh/stylearz_deploy stylvrey@premium115.web-hosting.com</pre>
+
+  <h3>Node.js app in cPanel (already set up — verify if needed)</h3>
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>Node version</td><td>18.x or 20.x</td></tr>
+    <tr><td>Mode</td><td>Production</td></tr>
+    <tr><td>Application root</td><td>stylearz</td></tr>
+    <tr><td>Application URL</td><td>stylearz.com</td></tr>
+    <tr><td>Startup file</td><td>app.js</td></tr>
+    <tr><td>Env</td><td>NODE_ENV=production · JWT_SECRET</td></tr>
+  </table>
+  <div class="warn">
+    <strong>CloudLinux:</strong> Do not create a real <code>node_modules</code> folder in the app root.
+    Use cPanel <strong>Run NPM Install</strong> only. The panel manages a symlink into a virtual env.
+  </div>
+
+  <h2>5. Deploy after code changes</h2>
+  <pre>cp credentials.example.json credentials.json
+# fill credentials.json (cPanel, SSH key path, JWT_SECRET)
+
+bash scripts/deploy-ssh.sh</pre>
+  <p>Then cPanel → <strong>Setup Node.js App</strong> → <strong>Restart</strong>
+  (and <strong>Run NPM Install</strong> only if <code>package.json</code> changed).</p>
+
+  <h2>6. Checklist</h2>
+  <ul>
+    <li>☐ Clone repo + <code>npm install</code> + <code>npm run dev</code></li>
+    <li>☐ Open http://127.0.0.1:5173 and log in with demo accounts</li>
+    <li>☐ SSH key authorized; test connection on port 21098</li>
+    <li>☐ Local <code>credentials.json</code> filled</li>
+    <li>☐ After deploy: Restart Node app; check https://stylearz.com</li>
+  </ul>
+
+  <div class="footer">
+    StyleARZ · Thingkers · Full detail also in repo: deploy/GUIDE.md
+  </div>
+
+</body>
+</html>

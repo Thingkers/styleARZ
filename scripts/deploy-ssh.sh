@@ -35,12 +35,16 @@ ssh "${SSH_OPTS[@]}" "$USER@$HOST" "mkdir -p '$REMOTE'"
 
 echo "==> Syncing app (excluding local secrets / node_modules / git)"
 # --delete would remove CloudLinux's node_modules symlink; keep filter protects it.
-rsync -az --delete --filter 'P node_modules' --filter 'P node_modules/**' \
+rsync -az --delete \
+  --filter 'P node_modules' --filter 'P node_modules/**' \
+  --filter 'P server/uploads' --filter 'P server/uploads/**' \
+  --filter 'P server/data' --filter 'P server/data/**' \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude '.env' \
   --exclude 'credentials.json' \
   --exclude 'server/data/db.json' \
+  --exclude 'server/uploads' \
   --exclude '.DS_Store' \
   --exclude '.shots' \
   --exclude 'tmp' \
@@ -51,7 +55,7 @@ rsync -az --delete --filter 'P node_modules' --filter 'P node_modules/**' \
 # CloudLinux NodeJS Selector owns node_modules as a symlink into a venv.
 # Never npm-install into the app root from SSH after the app exists; use cPanel "Run NPM Install".
 echo "==> Ensuring app root has no real node_modules folder (CloudLinux requirement)"
-ssh "${SSH_OPTS[@]}" "$USER@$HOST" "cd '$REMOTE' && if [ -d node_modules ] && [ ! -L node_modules ]; then rm -rf node_modules; echo removed_real_node_modules; elif [ -L node_modules ]; then echo symlink_ok; else echo no_node_modules; fi"
+ssh "${SSH_OPTS[@]}" "$USER@$HOST" "cd '$REMOTE' && mkdir -p server/uploads/inventory server/data && if [ -d node_modules ] && [ ! -L node_modules ]; then rm -rf node_modules; echo removed_real_node_modules; elif [ -L node_modules ]; then echo symlink_ok; else echo no_node_modules; fi"
 
 echo "Done. Files are at $REMOTE"
 echo "In cPanel → Setup Node.js App (create if needed):"

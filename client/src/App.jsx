@@ -12,6 +12,8 @@ import { Quiz, QuizResults } from "./pages/Quiz";
 import { Forgot, Login, Reset, Signup } from "./pages/Auth";
 import { Notifications, Planner, Profile, Wardrobe, Wishlist } from "./pages/Account";
 import Admin from "./pages/Admin";
+import Pos from "./pages/Pos";
+import PosScan from "./pages/PosScan";
 
 function RequireAuth({ children }) {
   const { user, ready } = useAuth();
@@ -23,8 +25,9 @@ function RequireAuth({ children }) {
 
 function RequireAdmin({ children }) {
   const { user, ready } = useAuth();
+  const location = useLocation();
   if (!ready) return <Loading />;
-  if (!user) return <Navigate to="/login?next=/admin" replace />;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (user.role !== "admin") return <Navigate to="/" replace />;
   return children;
 }
@@ -99,6 +102,22 @@ export default function App() {
           element={
             <RequireAdmin>
               <Admin />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/pos"
+          element={
+            <RequireAdmin>
+              <Pos />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/pos/scan"
+          element={
+            <RequireAdmin>
+              <PosScan />
             </RequireAdmin>
           }
         />

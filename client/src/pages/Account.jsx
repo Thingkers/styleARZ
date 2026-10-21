@@ -330,15 +330,71 @@ export function Notifications() {
 
 export function Profile() {
   useDocumentTitle("Profile");
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [profile, setProfile] = useState({
+    name: user?.name || "",
+    email: user?.email || "",
+    currentPassword: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+  useEffect(() => {
+    setProfile((current) => ({
+      ...current,
+      name: user?.name || "",
+      email: user?.email || "",
+    }));
+  }, [user?.name, user?.email]);
 
   useEffect(() => {
     api("/api/orders")
       .then((data) => setOrders(data.orders))
       .catch((err) => setError(err.message));
   }, []);
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (profile.password && profile.password !== profile.confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const body = {
+        name: profile.name,
+        email: profile.email,
+      };
+      if (profile.password) {
+        body.password = profile.password;
+        body.currentPassword = profile.currentPassword;
+      } else if (profile.email.trim().toLowerCase() !== String(user.email || "").toLowerCase()) {
+        body.currentPassword = profile.currentPassword;
+      }
+      const data = await api("/api/auth/profile", { method: "PATCH", body });
+      if (data.token) localStorage.setItem("sa-token", data.token);
+      updateUser(data.user);
+      setProfile((current) => ({
+        ...current,
+        name: data.user.name,
+        email: data.user.email,
+        currentPassword: "",
+        password: "",
+        confirmPassword: "",
+      }));
+      setNotice(data.message || "Account updated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="page wrap">
@@ -355,6 +411,72 @@ export function Profile() {
         {user.role === "admin" && <Link to="/admin">Atelier admin</Link>}
       </div>
       {error && <p className="error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+
+      <section className="panel profile-settings">
+        <div className="section-head">
+          <div>
+            <p className="kicker">Settings</p>
+            <h2>Name, email & password</h2>
+          </div>
+        </div>
+        <form className="form-grid" onSubmit={saveProfile}>
+          <label>
+            Display name
+            <input
+              required
+              maxLength={80}
+              value={profile.name}
+              onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+            />
+          </label>
+          <label>
+            Email
+            <input
+              required
+              type="email"
+              value={profile.email}
+              onChange={(event) => setProfile({ ...profile, email: event.target.value })}
+            />
+          </label>
+          <label className="span-2">
+            Current password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={profile.currentPassword}
+              onChange={(event) => setProfile({ ...profile, currentPassword: event.target.value })}
+              placeholder="Required to change email or password"
+            />
+          </label>
+          <label>
+            New password
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={profile.password}
+              onChange={(event) => setProfile({ ...profile, password: event.target.value })}
+              placeholder="Leave blank to keep current"
+              minLength={6}
+            />
+          </label>
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={profile.confirmPassword}
+              onChange={(event) => setProfile({ ...profile, confirmPassword: event.target.value })}
+              placeholder="Repeat new password"
+              minLength={6}
+            />
+          </label>
+          <button className="btn solid" type="submit" disabled={busy}>
+            {busy ? "Saving…" : "Save account"}
+          </button>
+        </form>
+      </section>
+
       <section>
         <div className="section-head">
           <h2>Orders</h2>

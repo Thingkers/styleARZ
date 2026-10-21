@@ -93,6 +93,7 @@ export function ShopProvider({ children }) {
   }
 
   async function toggleWish(productId) {
+    const previous = wishlist;
     const next = wishlist.includes(productId)
       ? wishlist.filter((id) => id !== productId)
       : [...wishlist, productId];
@@ -101,8 +102,10 @@ export function ShopProvider({ children }) {
       try {
         const data = await api("/api/wishlist", { method: "PUT", body: { productIds: next } });
         setWishlist(data.productIds);
+        notify(data.productIds.includes(productId) ? "Saved to wishlist." : "Removed from wishlist.");
       } catch (error) {
-        notify(error.message);
+        setWishlist(previous);
+        notify(error.message || "Could not update wishlist.");
       }
     } else {
       notify(next.includes(productId) ? "Saved on this device. Sign in to sync." : "Removed from wishlist.");

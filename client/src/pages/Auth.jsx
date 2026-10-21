@@ -62,11 +62,6 @@ export function Login() {
           {" · "}
           <Link to="/signup">Create account</Link>
         </p>
-        <div className="notice">
-          <p>Preview accounts</p>
-          <p>Client: farhan@stylearz.com · style123</p>
-          <p>Atelier: admin@stylearz.com · style123</p>
-        </div>
       </form>
     </div>
   );
