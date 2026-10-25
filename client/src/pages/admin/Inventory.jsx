@@ -159,10 +159,15 @@ export function InventoryList() {
   const [openKeys, setOpenKeys] = useState(() => new Set());
 
   useEffect(() => {
-    api("/api/inventory")
+    loadItems();
+  }, []);
+
+  function loadItems() {
+    setError("");
+    return api("/api/inventory")
       .then((data) => setItems(data.items))
       .catch((err) => setError(err.message));
-  }, []);
+  }
 
   function toggleGroup(key) {
     setOpenKeys((current) => {
@@ -246,7 +251,17 @@ export function InventoryList() {
     });
   }, [visible]);
 
-  if (!items) return error ? <p className="error">{error}</p> : <Loading />;
+  if (!items) {
+    if (!error) return <Loading />;
+    return (
+      <div>
+        <p className="error">{error}</p>
+        <button className="text-link" type="button" onClick={loadItems}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   const lowCount = items.filter((item) => stockLevel(item.stock) !== "ok").length;
   const units = items.reduce((sum, item) => sum + item.stock, 0);
@@ -680,6 +695,7 @@ function AddItem() {
   const [colourHint, setColourHint] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const photoRequestRef = useRef(0);
 
   const requested = STEPS.some((entry) => entry.id === searchParams.get("step")) ? searchParams.get("step") : "photo";
   const problem = validate(form, { multiSize: true });
@@ -693,11 +709,13 @@ function AddItem() {
   }, [step]);
 
   async function onPhoto(dataUrl) {
+    const requestId = ++photoRequestRef.current;
     setPhoto(dataUrl);
     setColourHint(null);
     if (!dataUrl) return;
     try {
       const hint = await colourFromImage(dataUrl);
+      if (requestId !== photoRequestRef.current) return;
       setColourHint(hint);
       setForm((current) => (current.color.trim() ? current : { ...current, color: hint.name, colorHex: hint.hex }));
     } catch {
@@ -724,36 +742,28 @@ function AddItem() {
     setError("");
     const sizes = selectedSizes(form);
     const base = toPayload(form);
-    const created = [];
     try {
-      for (const size of sizes) {
-        const { item } = await api("/api/inventory", {
-          method: "POST",
-          body: { ...base, size },
-        });
-        if (photo) {
-          try {
-            await api(`/api/inventory/${item.id}/image`, { method: "POST", body: { image: photo } });
-          } catch {
-            /* photo optional per variant */
-          }
-        }
-        created.push(item);
-      }
+      const data = await api("/api/inventory/batch", {
+        method: "POST",
+        body: {
+          items: sizes.map((size) => ({ ...base, size })),
+          ...(photo ? { image: photo } : {}),
+        },
+      });
+      const created = data.items;
+      const ids = created.map((item) => item.id).join(",");
+      const notice =
+        created.length === 1
+          ? `${created[0].name} saved with barcode ${created[0].barcode}.`
+          : `${created.length} sizes saved (${created.map((item) => item.size).join(", ")}). Each has its own barcode.`;
+      navigate(`/admin/barcodes?ids=${encodeURIComponent(ids)}`, {
+        replace: true,
+        state: { notice },
+      });
     } catch (err) {
       setError(err.message);
       setSaving(false);
-      return;
     }
-    const ids = created.map((item) => item.id).join(",");
-    const notice =
-      created.length === 1
-        ? `${created[0].name} saved with barcode ${created[0].barcode}.`
-        : `${created.length} sizes saved (${created.map((item) => item.size).join(", ")}). Each has its own barcode.`;
-    navigate(`/admin/barcodes?ids=${encodeURIComponent(ids)}`, {
-      replace: true,
-      state: { notice },
-    });
   }
 
   return (
@@ -788,6 +798,7 @@ function AddItem() {
             src={photo}
             onChange={onPhoto}
             onRemove={() => {
+              photoRequestRef.current += 1;
               setPhoto("");
               setColourHint(null);
             }}
@@ -938,32 +949,43 @@ function EditItem({ id }) {
   const [removePhoto, setRemovePhoto] = useState(false);
   const [barcodeSvg, setBarcodeSvg] = useState("");
   const [siblings, setSiblings] = useState([]);
+  const [siblingsError, setSiblingsError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState(location.state?.notice || "");
   const [error, setError] = useState(location.state?.error || "");
   const [saving, setSaving] = useState(false);
+  const photoRequestRef = useRef(0);
   const barcode = item?.barcode;
 
+  function loadSiblings(current) {
+    setSiblingsError("");
+    return api("/api/inventory")
+      .then((list) => {
+        setSiblings(
+          list.items.filter(
+            (entry) =>
+              entry.id !== current.id &&
+              entry.name === current.name &&
+              entry.color === current.color &&
+              entry.category === current.category
+          )
+        );
+      })
+      .catch((err) => {
+        setSiblings([]);
+        setSiblingsError(err.message);
+      });
+  }
+
   function loadItem() {
+    setLoadError("");
     return api(`/api/inventory/${id}`)
       .then((data) => {
         setItem(data.item);
         setForm(toForm(data.item));
         return data.item;
       })
-      .then((current) =>
-        api("/api/inventory").then((list) => {
-          setSiblings(
-            list.items.filter(
-              (entry) =>
-                entry.id !== current.id &&
-                entry.name === current.name &&
-                entry.color === current.color &&
-                entry.category === current.category
-            )
-          );
-        })
-      )
+      .then((current) => loadSiblings(current))
       .catch((err) => setLoadError(err.message));
   }
 
@@ -1079,18 +1101,26 @@ function EditItem({ id }) {
           <ItemPhoto
             src={shownPhoto}
             onChange={async (dataUrl) => {
+              const requestId = ++photoRequestRef.current;
               setPhoto(dataUrl);
               setRemovePhoto(false);
               if (!dataUrl || form.color.trim()) return;
               try {
                 const hint = await colourFromImage(dataUrl);
-                setForm((current) => ({ ...current, color: hint.name, colorHex: hint.hex }));
+                if (requestId !== photoRequestRef.current) return;
+                setForm((current) =>
+                  current.color.trim() ? current : { ...current, color: hint.name, colorHex: hint.hex }
+                );
                 setNotice(`Colour suggested from photo: ${hint.name}`);
               } catch {
                 /* ignore */
               }
             }}
-            onRemove={() => (photo ? setPhoto("") : setRemovePhoto(true))}
+            onRemove={() => {
+              photoRequestRef.current += 1;
+              if (photo) setPhoto("");
+              else setRemovePhoto(true);
+            }}
             note={photo ? "New photo uploads when you save." : removePhoto ? "Photo will be removed when you save." : ""}
           />
           <section className="inv-barcode-card">
@@ -1122,6 +1152,14 @@ function EditItem({ id }) {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {siblingsError && (
+              <div className="inv-siblings">
+                <p className="error">{siblingsError}</p>
+                <button type="button" className="text-link" onClick={() => loadSiblings(item)}>
+                  Retry loading sizes
+                </button>
               </div>
             )}
           </section>
