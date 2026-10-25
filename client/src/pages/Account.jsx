@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, writeAuthToken } from "../api";
 import { money, prettyDate } from "../format";
 import { useDocumentTitle } from "../hooks";
 import { useAuth } from "../context/AuthContext";
@@ -378,7 +378,7 @@ export function Profile() {
         body.currentPassword = profile.currentPassword;
       }
       const data = await api("/api/auth/profile", { method: "PATCH", body });
-      if (data.token) localStorage.setItem("sa-token", data.token);
+      if (data.token) writeAuthToken(data.token);
       updateUser(data.user);
       setProfile((current) => ({
         ...current,
