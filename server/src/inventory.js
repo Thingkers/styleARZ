@@ -137,6 +137,35 @@ function createItem(db, input = {}) {
   return item;
 }
 
+function createItems(db, inputs, image, uploadsDir) {
+  ensureCollections(db);
+  if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 100) {
+    throw httpError(400, "Create between 1 and 100 inventory items at a time.");
+  }
+
+  const previousItems = db.inventoryItems.slice();
+  const previousSeq = db.inventorySeq;
+  const created = [];
+  const savedImages = [];
+  try {
+    for (const input of inputs) {
+      const item = createItem(db, input);
+      if (image !== undefined) {
+        item.image = saveImageFromBase64(uploadsDir, item.id, image);
+        item.updatedAt = new Date().toISOString();
+        savedImages.push(item.image);
+      }
+      created.push(item);
+    }
+    return created;
+  } catch (err) {
+    db.inventoryItems = previousItems;
+    db.inventorySeq = previousSeq;
+    savedImages.forEach((imagePath) => removeImageFile(uploadsDir, imagePath));
+    throw err;
+  }
+}
+
 function addSizes(db, id, sizesInput, options = {}) {
   ensureCollections(db);
   const parent = findById(db, id);
@@ -513,6 +542,7 @@ module.exports = {
   httpError,
   ensureCollections,
   createItem,
+  createItems,
   updateItem,
   deleteItem,
   addSizes,
