@@ -2,14 +2,6 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
-const cors = require("cors");
-const store = require("./store");
-const { hashPassword, verifyPassword, signToken, verifyToken, publicUser } = require("./auth");
-const { suggestSize, quizResult, budgetOutfit, priceItems } = require("./logic");
-const inventory = require("./inventory");
-const home = require("./home");
-const pos = require("./pos");
-const barcode = require("./barcode");
 
 function loadEnv() {
   const envPath = path.join(__dirname, "..", "..", ".env");
@@ -35,19 +27,27 @@ function loadEnv() {
 
 loadEnv();
 
+const store = require("./store");
+const { hashPassword, verifyPassword, signToken, verifyToken, publicUser } = require("./auth");
+const { suggestSize, quizResult, budgetOutfit, priceItems } = require("./logic");
+const inventory = require("./inventory");
+const home = require("./home");
+const pos = require("./pos");
+const barcode = require("./barcode");
 const db = store.load();
 const app = express();
 
-app.use(cors({ origin: true }));
 const jsonBody = express.json({ limit: "1mb" });
 // Inventory image uploads carry base64 images and use their own larger parser after auth.
 app.use((req, res, next) => {
   if (req.method === "POST" && /^\/api\/inventory\/[^/]+\/image\/?$/.test(req.path)) return next();
+  if (req.method === "POST" && req.path === "/api/inventory/batch") return next();
   if (req.method === "PATCH" && /^\/api\/admin\/home-collections\/[^/]+\/?$/.test(req.path)) return next();
   return jsonBody(req, res, next);
 });
 
 app.use((req, res, next) => {
+  req.body = req.body || {};
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   const payload = verifyToken(token);
@@ -209,6 +209,10 @@ app.get("/api/auth/me", (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+app.post("/api/auth/logout", (req, res) => {
+  res.json({ ok: true, message: "Signed out." });
+});
+
 app.patch("/api/auth/profile", requireUser, (req, res) => {
   const user = req.user;
   const body = req.body || {};
@@ -245,6 +249,7 @@ app.patch("/api/auth/profile", requireUser, (req, res) => {
     user.hash = next.hash;
     user.resetCode = null;
     user.resetExpires = null;
+    user.resetAttempts = 0;
   }
 
   store.save();
@@ -256,6 +261,9 @@ app.patch("/api/auth/profile", requireUser, (req, res) => {
 });
 
 app.post("/api/auth/forgot", (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return fail(res, 503, "Password reset is unavailable until email delivery is configured.");
+  }
   const email = cleanEmail(req.body.email);
   const user = db.users.find((entry) => entry.email === email);
   if (!user) {
@@ -264,8 +272,9 @@ app.post("/api/auth/forgot", (req, res) => {
       message: "If that email is registered, a reset code is ready.",
     });
   }
-  user.resetCode = String(Math.floor(100000 + Math.random() * 900000));
+  user.resetCode = String(crypto.randomInt(100000, 1000000));
   user.resetExpires = Date.now() + 30 * 60 * 1000;
+  user.resetAttempts = 0;
   store.save();
   res.json({
     ok: true,
@@ -279,7 +288,23 @@ app.post("/api/auth/reset", (req, res) => {
   const code = String(req.body.code || "").trim();
   const password = String(req.body.password || "");
   const user = db.users.find((entry) => entry.email === email);
-  if (!user || !user.resetCode || user.resetCode !== code || user.resetExpires < Date.now()) {
+  if (
+    !user ||
+    !user.resetCode ||
+    !Number.isFinite(user.resetExpires) ||
+    user.resetExpires < Date.now() ||
+    (user.resetAttempts || 0) >= 5
+  ) {
+    return fail(res, 400, "The reset code is invalid or has expired.");
+  }
+  if (!/^\d{6}$/.test(code) || user.resetCode !== code) {
+    user.resetAttempts = (user.resetAttempts || 0) + 1;
+    if (user.resetAttempts >= 5) {
+      user.resetCode = null;
+      user.resetExpires = null;
+      user.resetAttempts = 0;
+    }
+    store.save();
     return fail(res, 400, "The reset code is invalid or has expired.");
   }
   if (password.length < 6) return fail(res, 400, "Use at least 6 characters.");
@@ -288,6 +313,7 @@ app.post("/api/auth/reset", (req, res) => {
   user.hash = next.hash;
   user.resetCode = null;
   user.resetExpires = null;
+  user.resetAttempts = 0;
   store.save();
   res.json({ ok: true, message: "Password updated. You can sign in." });
 });
@@ -309,6 +335,15 @@ app.post("/api/orders", (req, res) => {
   const catalog = inventory.shopCatalog(db);
   const priced = priceItems(catalog, req.body.items);
   if (priced.error) return fail(res, 400, priced.error);
+  const quantities = new Map();
+  for (const item of priced.items) {
+    if (!Number.isInteger(item.qty)) return fail(res, 400, "Quantity must be a whole number.");
+    quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.qty);
+  }
+  for (const [productId, qty] of quantities) {
+    const product = catalog.find((entry) => entry.id === productId);
+    if (!product || product.stock < qty) return fail(res, 400, "A piece in the bag does not have enough stock.");
+  }
   const name = String(req.body.name || "").trim();
   const email = cleanEmail(req.body.email);
   const address = String(req.body.address || "").trim();
@@ -329,7 +364,7 @@ app.post("/api/orders", (req, res) => {
     if (retail) retail.stock -= item.qty;
   });
   const order = {
-    id: `SA-${10000 + Math.floor(Math.random() * 90000)}`,
+    id: `SA-${crypto.randomBytes(16).toString("hex").toUpperCase()}`,
     userId: req.user ? req.user.id : null,
     email,
     name,
@@ -362,8 +397,12 @@ app.get("/api/orders", requireUser, (req, res) => {
 app.get("/api/orders/:id", (req, res) => {
   const order = db.orders.find((entry) => entry.id === req.params.id);
   if (!order) return fail(res, 404, "Order not found.");
-  if (req.user && req.user.role !== "admin" && order.userId && order.userId !== req.user.id && order.email !== req.user.email) {
-    return fail(res, 403, "This order belongs to another account.");
+  if (order.userId) {
+    if (!req.user || (req.user.role !== "admin" && order.userId !== req.user.id)) {
+      return fail(res, 403, "This order belongs to another account.");
+    }
+  } else if (!/^SA-[0-9A-F]{32}$/.test(order.id)) {
+    return fail(res, 404, "Order not found.");
   }
   res.json({ order });
 });
@@ -635,6 +674,7 @@ app.patch("/api/admin/users/:id", requireAdmin, (req, res) => {
     user.hash = next.hash;
     user.resetCode = null;
     user.resetExpires = null;
+    user.resetAttempts = 0;
   }
 
   store.save();
@@ -755,6 +795,12 @@ app.post("/api/inventory", requireAdmin, handle((req, res) => {
   const item = inventory.createItem(db, req.body || {});
   store.save();
   res.status(201).json({ item });
+}));
+
+app.post("/api/inventory/batch", requireAdmin, express.json({ limit: "3mb" }), handle((req, res) => {
+  const items = inventory.createItems(db, req.body && req.body.items, req.body && req.body.image, uploadsDir);
+  store.save();
+  res.status(201).json({ items });
 }));
 
 app.post("/api/inventory/import-catalog", requireAdmin, handle((req, res) => {
