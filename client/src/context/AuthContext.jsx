@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, clearAuthToken, readAuthToken, writeAuthToken } from "../api";
 
 const AuthContext = createContext(null);
 
@@ -8,34 +8,59 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("sa-token");
+    const token = readAuthToken();
     if (!token) {
       setReady(true);
       return;
     }
+
     api("/api/auth/me")
-      .then((data) => setUser(data.user))
-      .catch(() => localStorage.removeItem("sa-token"))
+      .then((data) => {
+        if (data?.user) {
+          setUser(data.user);
+          return;
+        }
+        clearAuthToken();
+        setUser(null);
+      })
+      .catch((error) => {
+        if (error?.status === 401 || error?.status === 403) {
+          clearAuthToken();
+          setUser(null);
+        }
+      })
       .finally(() => setReady(true));
   }, []);
 
   async function login(email, password) {
     const data = await api("/api/auth/login", { method: "POST", body: { email, password } });
-    localStorage.setItem("sa-token", data.token);
-    setUser(data.user);
+    if (!data?.token || typeof data.token !== "string") {
+      throw new Error("Authentication failed. Please try again.");
+    }
+    writeAuthToken(data.token);
+    setUser(data.user || null);
     return data.user;
   }
 
   async function signup(payload) {
     const data = await api("/api/auth/signup", { method: "POST", body: payload });
-    localStorage.setItem("sa-token", data.token);
-    setUser(data.user);
+    if (!data?.token || typeof data.token !== "string") {
+      throw new Error("Account created, but a session token was not returned.");
+    }
+    writeAuthToken(data.token);
+    setUser(data.user || null);
     return data.user;
   }
 
-  function logout() {
-    localStorage.removeItem("sa-token");
-    setUser(null);
+  async function logout() {
+    try {
+      await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    } catch {
+      // Best-effort logout; the server may not expose a dedicated logout endpoint.
+    } finally {
+      clearAuthToken();
+      setUser(null);
+    }
   }
 
   function updateUser(next) {
