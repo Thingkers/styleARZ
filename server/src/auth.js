@@ -1,6 +1,12 @@
 const crypto = require("crypto");
 
-const SECRET = process.env.JWT_SECRET || "stylearz-dev-secret-change-before-production";
+const SECRET = process.env.JWT_SECRET;
+
+if (process.env.NODE_ENV === "production" && (!SECRET || SECRET.length < 32)) {
+  throw new Error("Set JWT_SECRET to a random value of at least 32 characters in production.");
+}
+
+const signingSecret = SECRET || "stylearz-dev-secret-change-before-production";
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
@@ -22,14 +28,14 @@ function signToken(user) {
       exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
     })
   ).toString("base64url");
-  const sig = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
+  const sig = crypto.createHmac("sha256", signingSecret).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
 function verifyToken(token) {
   if (!token || !token.includes(".")) return null;
   const [body, sig] = token.split(".");
-  const expected = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
+  const expected = crypto.createHmac("sha256", signingSecret).update(body).digest("base64url");
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
@@ -44,7 +50,7 @@ function verifyToken(token) {
 
 function publicUser(user) {
   if (!user) return null;
-  const { salt, hash, resetCode, resetExpires, ...safe } = user;
+  const { salt, hash, resetCode, resetExpires, resetAttempts, ...safe } = user;
   return safe;
 }
 
