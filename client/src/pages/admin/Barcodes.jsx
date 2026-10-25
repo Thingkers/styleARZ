@@ -32,20 +32,44 @@ export default function Barcodes() {
   const [copies, setCopies] = useState("1");
   const [matchStock, setMatchStock] = useState(false);
   const [error, setError] = useState("");
+  const [barcodeError, setBarcodeError] = useState("");
+  const [retryLoad, setRetryLoad] = useState(0);
+  const [retryBarcodes, setRetryBarcodes] = useState(0);
   const location = useLocation();
   const [notice] = useState(location.state?.notice || "");
   const requested = useRef(new Set());
 
   useEffect(() => {
+    setError("");
     api("/api/inventory")
       .then((data) => setItems(data.items))
       .catch((err) => setError(err.message));
-  }, []);
+  }, [retryLoad]);
+
+  const copiesEach = Math.min(MAX_COPIES, Math.max(1, Math.floor(Number(copies)) || 1));
+  const order = items ? items.filter((item) => selected.has(item.id)) : [];
+  const wanted = order.reduce((sum, item) => {
+    const stockCount = Math.max(0, Math.floor(Number(item.stock) || 0));
+    return sum + (matchStock ? stockCount : copiesEach);
+  }, 0);
+  const labelItems = [];
+  order.forEach((item) => {
+    const count = matchStock
+      ? Math.max(0, Math.floor(Number(item.stock) || 0))
+      : copiesEach;
+    const remaining = MAX_LABELS - labelItems.length;
+    for (let copy = 0; copy < count && copy < remaining; copy += 1) {
+      labelItems.push({ key: `${item.id}-${copy}`, itemId: item.id });
+    }
+  });
+  const labelIds = [...new Set(labelItems.map(({ itemId }) => itemId))];
+  const labelRequestKey = labelIds.join(",");
 
   useEffect(() => {
-    const ids = [...selected].filter((id) => !requested.current.has(id));
+    const ids = labelIds.filter((id) => !requested.current.has(id));
     if (!ids.length) return;
     ids.forEach((id) => requested.current.add(id));
+    setBarcodeError("");
     fetchBarcodes(ids)
       .then((data) => {
         setLabels((current) => {
@@ -61,9 +85,9 @@ export default function Barcodes() {
       })
       .catch((err) => {
         ids.forEach((id) => requested.current.delete(id));
-        setError(err.message);
+        setBarcodeError(err.message);
       });
-  }, [selected]);
+  }, [labelRequestKey, retryBarcodes]);
 
   const shown = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -73,19 +97,10 @@ export default function Barcodes() {
     );
   }, [items, query]);
 
-  const copiesEach = Math.min(MAX_COPIES, Math.max(1, Math.floor(Number(copies)) || 1));
-  const order = items ? items.filter((item) => selected.has(item.id)) : [];
-  const pending = order.some((item) => !labels[item.id]);
-  const wanted = order.reduce((sum, item) => sum + (matchStock ? Math.max(1, item.stock) : copiesEach), 0);
-  const sheet = [];
-  order.forEach((item) => {
-    const label = labels[item.id];
-    if (!label) return;
-    const count = matchStock ? Math.max(1, item.stock) : copiesEach;
-    for (let copy = 0; copy < count && sheet.length < MAX_LABELS; copy += 1) {
-      sheet.push({ key: `${item.id}-${copy}`, label });
-    }
-  });
+  const pending = labelIds.some((id) => !labels[id]);
+  const sheet = labelItems
+    .filter(({ itemId }) => labels[itemId])
+    .map(({ key, itemId }) => ({ key, label: labels[itemId] }));
 
   function toggle(id) {
     setSelected((current) => {
@@ -100,7 +115,18 @@ export default function Barcodes() {
     setSelected((current) => new Set([...current, ...shown.map((item) => item.id)]));
   }
 
-  if (!items) return error ? <p className="error">{error}</p> : <Loading />;
+  if (!items) {
+    return error ? (
+      <div>
+        <p className="error">{error}</p>
+        <button type="button" className="btn line" onClick={() => setRetryLoad((count) => count + 1)}>
+          Retry loading inventory
+        </button>
+      </div>
+    ) : (
+      <Loading />
+    );
+  }
 
   if (items.length === 0) {
     return (
@@ -189,6 +215,17 @@ export default function Barcodes() {
             </p>
           )}
           {error && <p className="error">{error}</p>}
+          {barcodeError && <p className="error">{barcodeError}</p>}
+          {error && (
+            <button type="button" className="text-link" onClick={() => setRetryLoad((count) => count + 1)}>
+              Retry loading inventory
+            </button>
+          )}
+          {barcodeError && (
+            <button type="button" className="text-link" onClick={() => setRetryBarcodes((count) => count + 1)}>
+              Retry preparing labels
+            </button>
+          )}
           <button
             type="button"
             className="btn solid"
@@ -206,7 +243,13 @@ export default function Barcodes() {
           <p className="muted">Code 128 · prints three across on A4 or Letter</p>
         </div>
         {sheet.length === 0 ? (
-          <p className="muted no-print">{pending ? "Preparing labels…" : "Select items to preview their labels."}</p>
+          <p className="muted no-print">
+            {pending
+              ? "Preparing labels…"
+              : matchStock && selected.size > 0 && wanted === 0
+                ? "The selected items are out of stock, so there are no unit labels to print."
+                : "Select items to preview their labels."}
+          </p>
         ) : (
           <div className="barcode-sheet">
             {sheet.map(({ key, label }) => (
