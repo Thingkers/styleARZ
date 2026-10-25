@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
@@ -23,6 +23,8 @@ export default function Layout({ children }) {
   const [query, setQuery] = useState("");
   const [unread, setUnread] = useState(0);
   const [scrolled, setScrolled] = useState(false);
+  const drawerRef = useRef(null);
+  const drawerCloseRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -50,6 +52,45 @@ export default function Layout({ children }) {
   }, [accountOpen]);
 
   useEffect(() => {
+    if (!drawer) return undefined;
+    const previousFocus = document.activeElement;
+    const panel = drawerRef.current;
+    drawerCloseRef.current?.focus();
+
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        setDrawer(false);
+        return;
+      }
+      if (event.key !== "Tab" || !panel) return;
+
+      const focusable = [...panel.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [drawer, setDrawer]);
+
+  useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -61,9 +102,17 @@ export default function Layout({ children }) {
       setUnread(0);
       return;
     }
+    let active = true;
     api("/api/notifications")
-      .then((data) => setUnread(data.unread))
-      .catch(() => {});
+      .then((data) => {
+        if (active) setUnread(data.unread);
+      })
+      .catch((error) => {
+        if (active) console.error("Could not load notification count.", error);
+      });
+    return () => {
+      active = false;
+    };
   }, [user, location.pathname]);
 
   function onSearch(event) {
@@ -273,10 +322,24 @@ export default function Layout({ children }) {
 
       {drawer && (
         <div className="drawer-backdrop" onClick={() => setDrawer(false)} role="presentation">
-          <aside className="drawer" role="dialog" aria-label="Bag" onClick={(event) => event.stopPropagation()}>
+          <aside
+            ref={drawerRef}
+            className="drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bag-drawer-title"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
             <header>
-              <h2>Bag</h2>
-              <button type="button" className="icon-btn" onClick={() => setDrawer(false)} aria-label="Close bag">
+              <h2 id="bag-drawer-title">Bag</h2>
+              <button
+                ref={drawerCloseRef}
+                type="button"
+                className="icon-btn"
+                onClick={() => setDrawer(false)}
+                aria-label="Close bag"
+              >
                 ×
               </button>
             </header>
@@ -297,7 +360,12 @@ export default function Layout({ children }) {
                           −
                         </button>
                         <span>{item.qty}</span>
-                        <button type="button" onClick={() => updateQty(index, item.qty + 1)} aria-label="Increase">
+                        <button
+                          type="button"
+                          onClick={() => updateQty(index, item.qty + 1)}
+                          aria-label="Increase"
+                          disabled={item.qty >= Math.min(5, item.stock ?? 5)}
+                        >
                           +
                         </button>
                         <button type="button" className="text-link" onClick={() => removeFromCart(index)}>
@@ -319,9 +387,15 @@ export default function Layout({ children }) {
               <Link className="btn solid" to="/cart" onClick={() => setDrawer(false)}>
                 Review bag
               </Link>
-              <Link className={`btn dark ${cart.length === 0 ? "disabled" : ""}`} to="/checkout">
-                Checkout
-              </Link>
+              {cart.length === 0 ? (
+                <button className="btn dark" type="button" disabled>
+                  Checkout
+                </button>
+              ) : (
+                <Link className="btn dark" to="/checkout" onClick={() => setDrawer(false)}>
+                  Checkout
+                </Link>
+              )}
             </footer>
           </aside>
         </div>
