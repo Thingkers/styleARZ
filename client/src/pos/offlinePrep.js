@@ -3,8 +3,8 @@ import { syncCatalog } from "./sync";
 const PREPARED_KEY = "sa-pos-offline-prepared";
 const SHELL_PATHS = ["/", "/pos", "/pos/scan", "/favicon.svg", "/index.html"];
 // Keep cache names in sync with client/public/sw.js VERSION.
-const SHELL_CACHE = "sa-shell-v2";
-const ASSET_CACHE = "sa-assets-v2";
+const SHELL_CACHE = "sa-shell-v3";
+const ASSET_CACHE = "sa-assets-v3";
 
 function stamp() {
   return {
@@ -43,56 +43,58 @@ async function ensureServiceWorker() {
 }
 
 async function cacheShellInPage() {
-  if (!("caches" in window)) return;
+  if (!("caches" in window)) {
+    throw new Error("This browser cannot store the POS offline. Use Chrome or Safari on the shop devices.");
+  }
   const shell = await caches.open(SHELL_CACHE);
   const assets = await caches.open(ASSET_CACHE);
   const htmlResponse = await fetch("/", { cache: "reload" });
   if (!htmlResponse.ok) throw new Error("Could not download the app shell.");
-  const buffer = await htmlResponse.clone().arrayBuffer();
-  const text = new TextDecoder().decode(buffer);
-  const headers = htmlResponse.headers;
-
-  await Promise.all(
-    SHELL_PATHS.map((path) =>
-      shell.put(path, new Response(buffer.slice(0), { status: 200, headers })).catch(() => {})
-    )
-  );
+  const text = await htmlResponse.clone().text();
 
   const urls = [...new Set(text.match(/\/assets\/[^"'\s)]+/g) || [])];
+  if (!urls.length) throw new Error("The app shell did not contain any assets to cache.");
+
   await Promise.all(
-    urls.map(async (url) => {
-      try {
-        const response = await fetch(url, { cache: "reload" });
-        if (response.ok) await assets.put(url, response.clone());
-      } catch {
-        /* skip missing asset */
-      }
+    SHELL_PATHS.map(async (path) => {
+      const response = await fetch(path, { cache: "reload" });
+      if (!response.ok) throw new Error(`Could not download app page: ${path}`);
+      await shell.put(path, response);
     })
   );
 
   await Promise.all(
-    ["/pos", "/pos/scan"].map(async (path) => {
-      try {
-        const response = await fetch(path, { cache: "reload" });
-        if (response.ok) await shell.put(path, response.clone());
-      } catch {
-        /* ignore */
-      }
+    urls.map(async (url) => {
+      const response = await fetch(url, { cache: "reload" });
+      if (!response.ok) throw new Error(`Could not download app asset: ${url}`);
+      await assets.put(url, response);
     })
   );
 }
 
 async function askServiceWorkerToPrepare(registration) {
   const worker = registration.active || registration.waiting || registration.installing;
-  if (!worker || !navigator.serviceWorker.controller) return false;
+  if (!worker || !navigator.serviceWorker.controller) return null;
   return new Promise((resolve) => {
     const channel = new MessageChannel();
-    const timer = window.setTimeout(() => resolve(false), 8000);
-    channel.port1.onmessage = (event) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
       window.clearTimeout(timer);
-      resolve(Boolean(event.data?.ok));
+      channel.port1.close();
+      resolve(result);
     };
-    worker.postMessage({ type: "PREPARE_OFFLINE" }, [channel.port2]);
+    const timer = window.setTimeout(() => finish(false), 8000);
+    channel.port1.onmessage = (event) => {
+      finish(Boolean(event.data?.ok));
+    };
+    channel.port1.onmessageerror = () => finish(false);
+    try {
+      worker.postMessage({ type: "PREPARE_OFFLINE" }, [channel.port2]);
+    } catch {
+      finish(false);
+    }
   });
 }
 
@@ -106,7 +108,10 @@ export async function prepareOfflinePos() {
 
   const registration = await ensureServiceWorker();
   await cacheShellInPage();
-  await askServiceWorkerToPrepare(registration).catch(() => false);
+  const serviceWorkerPrepared = await askServiceWorkerToPrepare(registration);
+  if (serviceWorkerPrepared === false) {
+    throw new Error("The service worker could not finish offline preparation. Try again while online.");
+  }
 
   // Pull inventory barcodes into IndexedDB for Solo offline scanning/sales.
   try {
@@ -116,13 +121,6 @@ export async function prepareOfflinePos() {
     if (!error?.status) {
       throw new Error("App shell saved, but the product catalog did not download. Try again on Wi‑Fi.");
     }
-  }
-
-  // Warm the catalog HTTP cache the SW can serve offline.
-  try {
-    await fetch("/api/pos/catalog", { cache: "reload", credentials: "same-origin" });
-  } catch {
-    /* ignore */
   }
 
   const prepared = stamp();
