@@ -11,6 +11,7 @@ export default function Categories() {
   const [busy, setBusy] = useState(false);
 
   function load() {
+    setError("");
     return api("/api/inventory/categories")
       .then((data) => setCategories(data.categories))
       .catch((err) => setError(err.message));
@@ -42,6 +43,7 @@ export default function Categories() {
     if (to === null || !to.trim() || to.trim() === from) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const data = await api("/api/inventory/categories", { method: "PATCH", body: { from, to } });
       setCategories(data.categories);
@@ -57,6 +59,7 @@ export default function Categories() {
     if (!window.confirm(`Delete category “${category}”? Items keep their category text until you edit them.`)) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const data = await api("/api/inventory/categories", { method: "DELETE", body: { name: category } });
       setCategories(data.categories);
@@ -68,7 +71,17 @@ export default function Categories() {
     }
   }
 
-  if (!categories) return error ? <p className="error">{error}</p> : <Loading />;
+  if (!categories) {
+    if (!error) return <Loading />;
+    return (
+      <div>
+        <p className="error">{error}</p>
+        <button className="text-link" type="button" onClick={load}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="inv-categories">
@@ -86,27 +99,31 @@ export default function Categories() {
       <form className="panel inv-category-form" onSubmit={add}>
         <label>
           New category
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="e.g. Denim" required />
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="e.g. Denim" required disabled={busy} />
         </label>
         <button className="btn solid" type="submit" disabled={busy || name.trim().length < 2}>
           Add
         </button>
       </form>
-      <ul className="admin-table inv-category-list">
-        {categories.map((category) => (
-          <li key={category}>
-            <span>{category}</span>
-            <div className="inv-row-actions">
-              <button type="button" className="text-link" disabled={busy} onClick={() => rename(category)}>
-                Rename
-              </button>
-              <button type="button" className="text-link inv-danger" disabled={busy} onClick={() => remove(category)}>
-                Delete
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {categories.length === 0 ? (
+        <p className="muted">No categories yet. Add one above to get started.</p>
+      ) : (
+        <ul className="admin-table inv-category-list">
+          {categories.map((category) => (
+            <li key={category}>
+              <span>{category}</span>
+              <div className="inv-row-actions">
+                <button type="button" className="text-link" disabled={busy} onClick={() => rename(category)}>
+                  Rename
+                </button>
+                <button type="button" className="text-link inv-danger" disabled={busy} onClick={() => remove(category)}>
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
