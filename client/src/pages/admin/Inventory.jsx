@@ -948,6 +948,7 @@ function EditItem({ id }) {
   const [photo, setPhoto] = useState("");
   const [removePhoto, setRemovePhoto] = useState(false);
   const [barcodeSvg, setBarcodeSvg] = useState("");
+  const [barcodeError, setBarcodeError] = useState("");
   const [siblings, setSiblings] = useState([]);
   const [siblingsError, setSiblingsError] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -996,9 +997,13 @@ function EditItem({ id }) {
 
   useEffect(() => {
     if (!barcode) return;
+    setBarcodeError("");
     fetchBarcodes([id])
       .then((data) => setBarcodeSvg(data.items[0]?.svg || ""))
-      .catch(() => setBarcodeSvg(""));
+      .catch((err) => {
+        setBarcodeSvg("");
+        setBarcodeError(err.message);
+      });
   }, [id, barcode]);
 
   if (loadError) {
@@ -1127,6 +1132,7 @@ function EditItem({ id }) {
             <p className="kicker">Barcode</p>
             {barcodeSvg ? <img src={barcodeSrc(barcodeSvg)} alt={`Barcode ${item.barcode}`} /> : <code>{item.barcode}</code>}
             <p className="muted inv-barcode-code">{item.barcode}</p>
+            {barcodeError && <p className="error" role="alert">{barcodeError}</p>}
             <dl className="inv-facts">
               <div>
                 <dt>SKU</dt>
