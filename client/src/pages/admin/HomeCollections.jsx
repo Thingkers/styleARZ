@@ -6,13 +6,19 @@ import { Loading } from "../../components/ui";
 const AUDIENCES = ["Men", "Women", "Children", "Unisex"];
 const MAX_EDGE = 1600;
 const MAX_BYTES = 1.9 * 1024 * 1024;
+const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+const MAX_SOURCE_PIXELS = 40_000_000;
 
 function toJpeg(source, width, height) {
+  if (!width || !height || width * height > MAX_SOURCE_PIXELS) {
+    throw new Error("That photo has too many pixels to process. Resize it and try again.");
+  }
   const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser can't process the photo. Try another browser.");
   context.fillStyle = "#222";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.imageSmoothingQuality = "high";
@@ -26,6 +32,7 @@ function toJpeg(source, width, height) {
 
 async function photoFromFile(file) {
   if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
+  if (file.size > MAX_SOURCE_BYTES) throw new Error("That photo is larger than 25 MB. Choose a smaller image.");
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
@@ -44,9 +51,10 @@ export default function HomeCollections() {
   const [drafts, setDrafts] = useState({});
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [busyId, setBusyId] = useState("");
+  const [busyIds, setBusyIds] = useState(() => new Set());
 
   function load() {
+    setError("");
     return api("/api/admin/home-collections")
       .then((data) => {
         setCollections(data.collections);
@@ -71,8 +79,17 @@ export default function HomeCollections() {
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }
 
+  function setBusy(id, busy) {
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
   async function save(id) {
-    setBusyId(id);
+    setBusy(id, true);
     setError("");
     setNotice("");
     try {
@@ -85,7 +102,7 @@ export default function HomeCollections() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusyId("");
+      setBusy(id, false);
     }
   }
 
@@ -93,7 +110,7 @@ export default function HomeCollections() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setBusyId(id);
+    setBusy(id, true);
     setError("");
     setNotice("");
     try {
@@ -107,11 +124,21 @@ export default function HomeCollections() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusyId("");
+      setBusy(id, false);
     }
   }
 
-  if (!collections) return error ? <p className="error">{error}</p> : <Loading />;
+  if (!collections) {
+    if (!error) return <Loading />;
+    return (
+      <div>
+        <p className="error">{error}</p>
+        <button className="text-link" type="button" onClick={load}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="home-collections-admin">
@@ -132,7 +159,7 @@ export default function HomeCollections() {
       <ul className="home-collections-grid">
         {collections.map((entry) => {
           const draft = drafts[entry.id] || entry;
-          const busy = busyId === entry.id;
+          const busy = busyIds.has(entry.id);
           return (
             <li key={entry.id} className="panel">
               <div className="home-collections-preview">
