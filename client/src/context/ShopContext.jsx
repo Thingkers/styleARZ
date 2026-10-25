@@ -3,8 +3,11 @@ import { api } from "../api";
 import { useAuth } from "./AuthContext";
 
 const ShopContext = createContext(null);
+const CART_STORAGE_KEY = "sa-cart";
+const GUEST_WISHLIST_STORAGE_KEY = "sa-wish:guest";
+const MAX_CART_QUANTITY = 5;
 
-function readList(key) {
+function readStoredList(key) {
   try {
     const parsed = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(parsed) ? parsed : [];
@@ -13,29 +16,105 @@ function readList(key) {
   }
 }
 
+function writeStoredList(key, items) {
+  try {
+    localStorage.setItem(key, JSON.stringify(items));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStoredList(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function readCart() {
+  return readStoredList(CART_STORAGE_KEY).filter(
+    (item) =>
+      item &&
+      typeof item.productId === "string" &&
+      typeof item.name === "string" &&
+      typeof item.price === "number" &&
+      Number.isFinite(item.price) &&
+      item.price >= 0 &&
+      typeof item.size === "string" &&
+      typeof item.color === "string" &&
+      Number.isInteger(item.qty) &&
+      item.qty > 0
+  ).map((item) => ({
+    ...item,
+    stock: Number.isFinite(item.stock) && item.stock >= 1 ? item.stock : MAX_CART_QUANTITY,
+    qty: Math.min(item.qty, MAX_CART_QUANTITY),
+  }));
+}
+
+function cleanProductIds(ids) {
+  return [...new Set((Array.isArray(ids) ? ids : []).filter(
+    (productId) => typeof productId === "string" && productId.length > 0
+  ))];
+}
+
+function readGuestWishlist() {
+  try {
+    return cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
+  } catch {
+    return [];
+  }
+}
+
 export function ShopProvider({ children }) {
-  const { user } = useAuth();
-  const [cart, setCart] = useState(() => readList("sa-cart"));
-  const [wishlist, setWishlist] = useState(() => readList("sa-wish"));
+  const { user, ready: authReady } = useAuth();
+  const [cart, setCart] = useState(readCart);
+  const [wishlist, setWishlist] = useState(() => cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY)));
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    localStorage.setItem("sa-cart", JSON.stringify(cart));
+    if (!writeStoredList(CART_STORAGE_KEY, cart)) {
+      setToast("Your bag changed, but this browser could not save it.");
+    }
   }, [cart]);
 
   useEffect(() => {
-    localStorage.setItem("sa-wish", JSON.stringify(wishlist));
-  }, [wishlist]);
+    if (!authReady) return undefined;
 
-  useEffect(() => {
-    if (!user) return;
-    const merged = [...new Set([...(user.wishlist || []), ...wishlist])];
+    let active = true;
+    if (!user) {
+      setWishlist(readGuestWishlist());
+      return () => {
+        active = false;
+      };
+    }
+
+    const guestWishlist = cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
+    const merged = cleanProductIds([...(user.wishlist || []), ...guestWishlist]);
     setWishlist(merged);
-    api("/api/wishlist", { method: "PUT", body: { productIds: merged } }).catch(() => {});
-    // Merge once when the signed-in account changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+
+    api("/api/wishlist", { method: "PUT", body: { productIds: merged } })
+      .then((data) => {
+        if (!Array.isArray(data.productIds)) {
+          throw new Error("The server returned an invalid wishlist.");
+        }
+        if (!active) return;
+        setWishlist(cleanProductIds(data.productIds));
+        if (!removeStoredList(GUEST_WISHLIST_STORAGE_KEY)) {
+          setToast("Wishlist synced, but guest wishlist data could not be cleared from this browser.");
+        }
+      })
+      .catch((error) => {
+        if (active) setToast(error.message || "Could not sync your wishlist. Please try again.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [authReady, user?.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -49,13 +128,16 @@ export function ShopProvider({ children }) {
 
   function addToCart(product, { size, color, qty = 1 }) {
     if (!size || !color) throw new Error("Choose a size and a colour.");
-    if (product.stock < 1) throw new Error("This piece is currently out of stock.");
+    if (!Number.isInteger(qty) || qty < 1) throw new Error("Choose a valid quantity.");
+    const stock = Number(product.stock);
+    if (!Number.isFinite(stock) || stock < 1) throw new Error("This piece is currently out of stock.");
     const index = cart.findIndex(
       (item) => item.productId === product.id && item.size === size && item.color === color
     );
     const existingQty = index >= 0 ? cart[index].qty : 0;
-    if (existingQty + qty > product.stock) {
-      throw new Error(`Only ${product.stock} available.`);
+    const maxQty = Math.min(MAX_CART_QUANTITY, stock);
+    if (existingQty + qty > maxQty) {
+      throw new Error(`You can add up to ${maxQty} of this piece.`);
     }
     const next = cart.slice();
     if (index >= 0) next[index] = { ...next[index], qty: existingQty + qty };
@@ -65,6 +147,7 @@ export function ShopProvider({ children }) {
         name: product.name,
         price: product.price,
         image: product.image,
+        stock,
         size,
         color,
         qty,
@@ -77,9 +160,19 @@ export function ShopProvider({ children }) {
 
   function updateQty(index, qty) {
     setCart((current) => {
+      if (!Number.isInteger(index) || index < 0 || index >= current.length || !Number.isInteger(qty)) {
+        return current;
+      }
       const next = current.slice();
       if (qty < 1) next.splice(index, 1);
-      else next[index] = { ...next[index], qty };
+      else {
+        const maxQty = Math.min(
+          MAX_CART_QUANTITY,
+          Number.isFinite(current[index].stock) ? current[index].stock : MAX_CART_QUANTITY
+        );
+        if (maxQty < 1) next.splice(index, 1);
+        else next[index] = { ...next[index], qty: Math.min(maxQty, qty) };
+      }
       return next;
     });
   }
@@ -93,6 +186,10 @@ export function ShopProvider({ children }) {
   }
 
   async function toggleWish(productId) {
+    if (typeof productId !== "string" || productId.length === 0) {
+      notify("Could not update wishlist: invalid product.");
+      return;
+    }
     const previous = wishlist;
     const next = wishlist.includes(productId)
       ? wishlist.filter((id) => id !== productId)
@@ -101,13 +198,20 @@ export function ShopProvider({ children }) {
     if (user) {
       try {
         const data = await api("/api/wishlist", { method: "PUT", body: { productIds: next } });
-        setWishlist(data.productIds);
-        notify(data.productIds.includes(productId) ? "Saved to wishlist." : "Removed from wishlist.");
+        if (!Array.isArray(data.productIds)) throw new Error("The server returned an invalid wishlist.");
+        const savedIds = cleanProductIds(data.productIds);
+        setWishlist(savedIds);
+        notify(savedIds.includes(productId) ? "Saved to wishlist." : "Removed from wishlist.");
       } catch (error) {
         setWishlist(previous);
         notify(error.message || "Could not update wishlist.");
       }
     } else {
+      if (!writeStoredList(GUEST_WISHLIST_STORAGE_KEY, next)) {
+        setWishlist(previous);
+        notify("Could not save your wishlist in this browser.");
+        return;
+      }
       notify(next.includes(productId) ? "Saved on this device. Sign in to sync." : "Removed from wishlist.");
     }
   }
