@@ -10,11 +10,13 @@ function canUseLiveCamera() {
 }
 
 function toJpeg(source, width, height) {
+  if (!width || !height) throw new Error("Couldn't read the image dimensions. Try another photo.");
   const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext("2d");
+  if (!context) throw new Error("Your browser couldn't prepare this photo. Try another browser or image.");
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.imageSmoothingQuality = "high";
@@ -28,6 +30,25 @@ function toJpeg(source, width, height) {
 
 async function photoFromFile(file) {
   if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
+  if (typeof createImageBitmap === "function") {
+    let image;
+    try {
+      image = await createImageBitmap(file, {
+        resizeWidth: MAX_EDGE,
+        resizeHeight: MAX_EDGE,
+        resizeQuality: "high",
+        resizeMode: "max",
+      });
+    } catch {
+      throw new Error("Couldn't read that image. Try a JPEG or PNG photo.");
+    }
+    try {
+      return toJpeg(image, image.width, image.height);
+    } finally {
+      image.close();
+    }
+  }
+
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
@@ -79,8 +100,17 @@ function LiveCamera({ onCapture, onClose }) {
         }
         stream = media;
         const video = videoRef.current;
+        if (!video) {
+          media.getTracks().forEach((track) => track.stop());
+          return;
+        }
         video.srcObject = media;
-        video.play().catch(() => {});
+        video.play().catch(() => {
+          if (!cancelled) {
+            setReady(false);
+            setError("The camera preview couldn't start. Close it and try again, or use Take photo instead.");
+          }
+        });
       })
       .catch((err) => {
         if (!cancelled) setError(cameraMessage(err));
@@ -88,6 +118,7 @@ function LiveCamera({ onCapture, onClose }) {
     return () => {
       cancelled = true;
       stream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current?.srcObject === stream) videoRef.current.srcObject = null;
     };
   }, [facing]);
 
@@ -105,7 +136,7 @@ function LiveCamera({ onCapture, onClose }) {
     <Modal title="Live camera" onClose={onClose}>
       <div className="inv-camera-body">
         <div className="inv-camera">
-          <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setReady(true)} />
+          <video ref={videoRef} autoPlay playsInline muted onPlaying={() => setReady(true)} />
           {!ready && !error && <p>Starting camera…</p>}
         </div>
         {error && <p className="error">{error}</p>}
@@ -133,20 +164,42 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
   const [camera, setCamera] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  const operationRef = useRef(0);
+
+  useEffect(() => () => {
+    operationRef.current += 1;
+  }, []);
 
   async function onFile(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    const operation = ++operationRef.current;
     setError("");
     setWorking(true);
     try {
-      onChange(await photoFromFile(file));
+      const dataUrl = await photoFromFile(file);
+      if (operation === operationRef.current) onChange(dataUrl);
     } catch (err) {
-      setError(err.message);
+      if (operation === operationRef.current) setError(err.message);
     } finally {
-      setWorking(false);
+      if (operation === operationRef.current) setWorking(false);
     }
+  }
+
+  function removePhoto() {
+    operationRef.current += 1;
+    setWorking(false);
+    setError("");
+    onRemove();
+  }
+
+  function capturePhoto(dataUrl) {
+    operationRef.current += 1;
+    setWorking(false);
+    setError("");
+    onChange(dataUrl);
+    setCamera(false);
   }
 
   return (
@@ -180,12 +233,12 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
           <input type="file" accept="image/*" onChange={onFile} disabled={working} />
         </label>
         {canUseLiveCamera() && (
-          <button type="button" className="btn line" onClick={() => setCamera(true)}>
+          <button type="button" className="btn line" disabled={working} onClick={() => setCamera(true)}>
             Live camera
           </button>
         )}
         {src && onRemove && (
-          <button type="button" className="text-link" onClick={onRemove}>
+          <button type="button" className="text-link" disabled={working} onClick={removePhoto}>
             Remove photo
           </button>
         )}
@@ -193,11 +246,7 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
       {camera && (
         <LiveCamera
           onClose={() => setCamera(false)}
-          onCapture={(dataUrl) => {
-            setError("");
-            onChange(dataUrl);
-            setCamera(false);
-          }}
+          onCapture={capturePhoto}
         />
       )}
     </div>
