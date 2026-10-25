@@ -33,7 +33,12 @@ export function Cart() {
                       −
                     </button>
                     <span>{item.qty}</span>
-                    <button type="button" onClick={() => updateQty(index, Math.min(5, item.qty + 1))} aria-label="Increase">
+                    <button
+                      type="button"
+                      onClick={() => updateQty(index, item.qty + 1)}
+                      aria-label="Increase"
+                      disabled={item.qty >= Math.min(5, item.stock ?? 5)}
+                    >
                       +
                     </button>
                   </div>
