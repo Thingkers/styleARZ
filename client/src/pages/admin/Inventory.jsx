@@ -712,14 +712,17 @@ function AddItem() {
     const requestId = ++photoRequestRef.current;
     setPhoto(dataUrl);
     setColourHint(null);
+    setError("");
     if (!dataUrl) return;
     try {
       const hint = await colourFromImage(dataUrl);
       if (requestId !== photoRequestRef.current) return;
       setColourHint(hint);
       setForm((current) => (current.color.trim() ? current : { ...current, color: hint.name, colorHex: hint.hex }));
-    } catch {
-      /* ignore colour sample failures */
+    } catch (err) {
+      if (requestId === photoRequestRef.current) {
+        setError(`Photo was added, but a colour suggestion could not be generated: ${err.message}`);
+      }
     }
   }
 
@@ -1109,6 +1112,7 @@ function EditItem({ id }) {
               const requestId = ++photoRequestRef.current;
               setPhoto(dataUrl);
               setRemovePhoto(false);
+              setNotice("");
               if (!dataUrl || form.color.trim()) return;
               try {
                 const hint = await colourFromImage(dataUrl);
@@ -1117,14 +1121,17 @@ function EditItem({ id }) {
                   current.color.trim() ? current : { ...current, color: hint.name, colorHex: hint.hex }
                 );
                 setNotice(`Colour suggested from photo: ${hint.name}`);
-              } catch {
-                /* ignore */
+              } catch (err) {
+                if (requestId === photoRequestRef.current) {
+                  setNotice(`Photo was added, but a colour suggestion could not be generated: ${err.message}`);
+                }
               }
             }}
             onRemove={() => {
               photoRequestRef.current += 1;
               if (photo) setPhoto("");
               else setRemovePhoto(true);
+              setNotice("");
             }}
             note={photo ? "New photo uploads when you save." : removePhoto ? "Photo will be removed when you save." : ""}
           />

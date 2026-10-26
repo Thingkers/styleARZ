@@ -2005,6 +2005,11 @@ textarea {
   background: rgba(155, 44, 44, 0.1);
 }
 
+.inv-stock.is-unknown {
+  color: var(--muted);
+  background: rgba(80, 80, 80, 0.1);
+}
+
 .inv-row-actions {
   grid-area: actions;
   display: flex;
@@ -4394,4 +4399,3 @@ label.inv-photo-frame:hover {
     grid-template-columns: 1fr;
   }
 }
-
