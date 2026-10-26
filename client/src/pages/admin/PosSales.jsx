@@ -8,8 +8,27 @@ import { variantText } from "./inventoryUtils";
 const LIMIT = 200;
 const METHODS = ["all", "cash", "card", "mobile", "other"];
 
+function readNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizeMethod(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function unitCount(sale) {
-  return sale.items.reduce((sum, line) => sum + line.qty, 0);
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+  return items.reduce((sum, line) => sum + readNumber(line?.qty, 0), 0);
+}
+
+function isSameDay(dateValue, referenceDate = new Date()) {
+  if (!dateValue) return false;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+
+  return date.toDateString() === referenceDate.toDateString();
 }
 
 export default function PosSales() {
@@ -22,7 +41,7 @@ export default function PosSales() {
     setRefreshing(true);
     api(`/api/pos/sales?limit=${LIMIT}`)
       .then((data) => {
-        setSales(data.sales);
+        setSales(Array.isArray(data?.sales) ? data.sales : []);
         setError("");
       })
       .catch((err) => setError(err.message))
@@ -34,17 +53,19 @@ export default function PosSales() {
   }, []);
 
   const shown = useMemo(
-    () => (sales || []).filter((sale) => method === "all" || sale.paymentMethod === method),
+    () =>
+      (sales || []).filter(
+        (sale) => method === "all" || normalizeMethod(sale?.paymentMethod) === method
+      ),
     [sales, method]
   );
 
   if (!sales) return error ? <p className="error">{error}</p> : <Loading />;
 
-  const today = new Date().toDateString();
-  const revenue = shown.reduce((sum, sale) => sum + sale.total, 0);
+  const revenue = shown.reduce((sum, sale) => sum + readNumber(sale?.total, 0), 0);
   const todayRevenue = shown
-    .filter((sale) => new Date(sale.createdAt).toDateString() === today)
-    .reduce((sum, sale) => sum + sale.total, 0);
+    .filter((sale) => isSameDay(sale?.createdAt, new Date()))
+    .reduce((sum, sale) => sum + readNumber(sale?.total, 0), 0);
   const units = shown.reduce((sum, sale) => sum + unitCount(sale), 0);
 
   return (
@@ -100,10 +121,14 @@ export default function PosSales() {
         />
       ) : (
         <ul className="sales-list">
-          {shown.map((sale) => {
+          {shown.map((sale, index) => {
             const count = unitCount(sale);
+            const items = Array.isArray(sale?.items) ? sale.items : [];
+            const discount = readNumber(sale?.discount, 0);
+            const total = readNumber(sale?.total, 0);
+            const paymentMethod = String(sale?.paymentMethod ?? "").trim();
             return (
-              <li key={sale.id}>
+              <li key={sale.id ?? `${sale.receiptNo ?? "sale"}-${index}`}>
                 <details>
                   <summary>
                     <span className="sales-ref">
@@ -114,33 +139,35 @@ export default function PosSales() {
                     <span className="sales-count">
                       {count} {count === 1 ? "item" : "items"}
                     </span>
-                    <span className="sales-method">{sale.paymentMethod}</span>
-                    <strong className="sales-total">{money(sale.total)}</strong>
+                    <span className="sales-method">{paymentMethod || "Unknown"}</span>
+                    <strong className="sales-total">{money(total)}</strong>
                   </summary>
                   <div className="sales-detail">
                     <ul className="mini-lines">
-                      {sale.items.map((line, index) => {
+                      {items.map((line, itemIndex) => {
                         const variant = variantText(line);
+                        const qty = readNumber(line?.qty, 0);
+                        const lineTotal = readNumber(line?.lineTotal, 0);
                         return (
-                          <li key={`${line.itemId}-${index}`}>
+                          <li key={`${line?.itemId ?? "item"}-${itemIndex}`}>
                             <span>
-                              {line.qty} × {line.name}
+                              {qty} × {line?.name ?? "Unknown item"}
                               {variant && <em className="muted"> · {variant}</em>}
                             </span>
-                            <span>{money(line.lineTotal)}</span>
+                            <span>{money(lineTotal)}</span>
                           </li>
                         );
                       })}
                     </ul>
-                    {sale.discount > 0 && (
+                    {discount > 0 && (
                       <p className="total-line">
                         <span>Discount</span>
-                        <span>−{money(sale.discount)}</span>
+                        <span>−{money(discount)}</span>
                       </p>
                     )}
                     <p className="total-line total">
                       <span>Total</span>
-                      <strong>{money(sale.total)}</strong>
+                      <strong>{money(total)}</strong>
                     </p>
                     {sale.source === "offline" && (
                       <p className="muted">Rung up offline · synced {prettyDateTime(sale.syncedAt)}</p>
