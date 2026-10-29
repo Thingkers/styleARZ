@@ -335,6 +335,14 @@ app.post("/api/orders", (req, res) => {
   const catalog = inventory.shopCatalog(db);
   const priced = priceItems(catalog, req.body.items);
   if (priced.error) return fail(res, 400, priced.error);
+  if (
+    req.body.expectedSubtotal !== undefined &&
+    (typeof req.body.expectedSubtotal !== "number" ||
+      !Number.isFinite(req.body.expectedSubtotal) ||
+      req.body.expectedSubtotal !== priced.subtotal)
+  ) {
+    return fail(res, 409, "Prices have changed. Review the updated total and place your order again.");
+  }
   const quantities = new Map();
   for (const item of priced.items) {
     if (!Number.isInteger(item.qty)) return fail(res, 400, "Quantity must be a whole number.");

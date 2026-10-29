@@ -68,7 +68,7 @@ export function Cart() {
 export function Checkout() {
   useDocumentTitle("Checkout");
   const { user } = useAuth();
-  const { cart, subtotal, clearCart, notify } = useShop();
+  const { cart, subtotal, clearCart, updateCartPrices, notify } = useShop();
   const navigate = useNavigate();
   const [form, setForm] = useState({
     name: user?.name || "",
@@ -114,6 +114,26 @@ export function Checkout() {
     }
     setBusy(true);
     try {
+      const catalog = await api("/api/products");
+      if (!Array.isArray(catalog.products)) {
+        throw new Error("Could not verify current product prices. Please try again.");
+      }
+      const pricesById = new Map(catalog.products.map((product) => [product.id, product.price]));
+      const unavailable = cart.find((item) => !pricesById.has(item.productId));
+      if (unavailable) {
+        throw new Error(`${unavailable.name} is no longer available. Remove it from your bag to continue.`);
+      }
+      const currentSubtotal = cart.reduce(
+        (sum, item) => sum + pricesById.get(item.productId) * item.qty,
+        0
+      );
+      const pricesChanged = cart.some((item) => pricesById.get(item.productId) !== item.price);
+      updateCartPrices(catalog.products);
+      if (pricesChanged) {
+        setError("Prices have changed. Review the updated total and place your order again.");
+        return;
+      }
+
       const data = await api("/api/orders", {
         method: "POST",
         body: {
@@ -125,6 +145,7 @@ export function Checkout() {
           country: form.country,
           notes: form.notes,
           paymentLast4: digits.slice(-4),
+          expectedSubtotal: currentSubtotal,
           items: cart.map((item) => ({
             productId: item.productId,
             size: item.size,
@@ -239,18 +260,45 @@ export function Confirmation() {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
   useDocumentTitle("Order confirmed");
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    setOrder(null);
     api(`/api/orders/${id}`)
-      .then((data) => setOrder(data.order))
-      .catch((err) => setError(err.message));
-  }, [id]);
+      .then((data) => {
+        if (active) setOrder(data.order);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, attempt]);
 
   return (
     <div className="page wrap narrow">
-      <PageHeader kicker="Confirmed" title="The order is with the atelier" lede={order ? `Reference ${order.id}` : "Fetching the confirmation"} />
-      {error && <p className="error">{error}</p>}
+      <PageHeader
+        kicker={error ? "Order lookup" : order ? "Confirmed" : "Order lookup"}
+        title={error ? "We couldn't load this order" : loading ? "Checking your order" : "The order is with the atelier"}
+        lede={order ? `Reference ${order.id}` : loading ? "Fetching the confirmation" : ""}
+      />
+      {error && (
+        <div className="stack">
+          <p className="error">{error}</p>
+          <button className="btn dark" type="button" onClick={() => setAttempt((current) => current + 1)}>
+            Try again
+          </button>
+        </div>
+      )}
       {order && (
         <div className="panel">
           <p className={`status status-${order.status}`}>{order.status}</p>

@@ -185,6 +185,15 @@ export function ShopProvider({ children }) {
     setCart([]);
   }
 
+  function updateCartPrices(products) {
+    const pricesById = new Map(products.map((product) => [product.id, product.price]));
+    setCart((current) =>
+      current.map((item) =>
+        pricesById.has(item.productId) ? { ...item, price: pricesById.get(item.productId) } : item
+      )
+    );
+  }
+
   async function toggleWish(productId) {
     if (typeof productId !== "string" || productId.length === 0) {
       notify("Could not update wishlist: invalid product.");
@@ -231,6 +240,7 @@ export function ShopProvider({ children }) {
       updateQty,
       removeFromCart,
       clearCart,
+      updateCartPrices,
       toggleWish,
       count,
       subtotal,
