@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
@@ -21,7 +21,14 @@ export function Login() {
     try {
       const user = await login(form.email, form.password);
       const next = params.get("next");
-      navigate(next || (user.role === "admin" ? "/admin" : "/"));
+      let destination = "";
+      if (next && next.startsWith("/") && !next.startsWith("//")) {
+        const url = new URL(next, window.location.origin);
+        if (url.origin === window.location.origin) {
+          destination = `${url.pathname}${url.search}${url.hash}`;
+        }
+      }
+      navigate(destination || (user.role === "admin" ? "/admin" : "/"));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -103,6 +110,7 @@ export function Signup() {
           <input
             required
             autoComplete="name"
+            maxLength={80}
             value={form.name}
             onChange={(event) => setForm({ ...form, name: event.target.value })}
           />
@@ -196,7 +204,7 @@ export function Forgot() {
 export function Reset() {
   useDocumentTitle("Set new password");
   const navigate = useNavigate();
-  const params = new URLSearchParams(window.location.search);
+  const [params] = useSearchParams();
   const [form, setForm] = useState({
     email: params.get("email") || "",
     code: "",
@@ -205,6 +213,13 @@ export function Reset() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [redirectToLogin, setRedirectToLogin] = useState(false);
+
+  useEffect(() => {
+    if (!redirectToLogin) return undefined;
+    const timeout = window.setTimeout(() => navigate("/login"), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [redirectToLogin, navigate]);
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -213,7 +228,7 @@ export function Reset() {
     try {
       const data = await api("/api/auth/reset", { method: "POST", body: form });
       setMessage(data.message);
-      setTimeout(() => navigate("/login"), 1200);
+      setRedirectToLogin(true);
     } catch (err) {
       setError(err.message);
     } finally {

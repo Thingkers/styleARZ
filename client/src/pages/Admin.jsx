@@ -53,6 +53,7 @@ function Overview() {
   const [data, setData] = useState(null);
   const [lowInventory, setLowInventory] = useState(null);
   const [error, setError] = useState("");
+  const [lowInventoryError, setLowInventoryError] = useState("");
 
   useEffect(() => {
     api("/api/admin/overview")
@@ -60,7 +61,7 @@ function Overview() {
       .catch((err) => setError(err.message));
     api(`/api/inventory?lowStock=${LOW_STOCK}`)
       .then((result) => setLowInventory(result.items))
-      .catch(() => {});
+      .catch((err) => setLowInventoryError(err.message));
   }, []);
 
   if (error) return <p className="error">{error}</p>;
@@ -103,13 +104,15 @@ function Overview() {
           </ul>
         )}
       </section>
-      {lowInventory && (
+      {(lowInventory || lowInventoryError) && (
         <section>
           <div className="section-head">
             <h2>Low stock · shop floor</h2>
             <Link to="/admin/inventory">Manage inventory</Link>
           </div>
-          {lowInventory.length === 0 ? (
+          {lowInventoryError ? (
+            <p className="error">Unable to load shop-floor inventory: {lowInventoryError}</p>
+          ) : lowInventory.length === 0 ? (
             <p className="muted">Shop-floor inventory is comfortably stocked.</p>
           ) : (
             <ul className="admin-table">
@@ -132,6 +135,7 @@ function Overview() {
 
 function Products() {
   const [products, setProducts] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -143,8 +147,12 @@ function Products() {
       .then((data) => {
         setProducts(data.products);
         setDirty(false);
+        setLoaded(true);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        setError(err.message);
+        setLoaded(true);
+      });
   }
 
   useEffect(() => {
@@ -155,9 +163,11 @@ function Products() {
     setMessage("");
     setError("");
     try {
-      await api(`/api/admin/products/${product.id}`, { method: "PATCH", body: patch });
+      const data = await api(`/api/admin/products/${product.id}`, { method: "PATCH", body: patch });
+      setProducts((current) =>
+        current.map((entry) => (entry.id === product.id ? { ...entry, ...data.product } : entry))
+      );
       setMessage(`${product.name} updated.`);
-      load();
     } catch (err) {
       setError(err.message);
     }
@@ -212,7 +222,7 @@ function Products() {
     }
   }
 
-  if (!products.length && !error) return <Loading />;
+  if (!loaded) return <Loading />;
 
   return (
     <div className="catalog-order">
@@ -231,6 +241,7 @@ function Products() {
       {message && <p className="notice">{message}</p>}
       {dirty && <p className="notice">You have unsaved changes — click Save changes.</p>}
       <ul className="admin-products catalog-order-grid">
+        {products.length === 0 && !error && <li className="muted">No products are available to manage.</li>}
         {products.map((product, index) => (
           <li
             key={product.id}
@@ -316,8 +327,13 @@ function Orders() {
   }, []);
 
   async function setStatus(id, status) {
-    await api(`/api/admin/orders/${id}`, { method: "PATCH", body: { status } });
-    load();
+    setError("");
+    try {
+      await api(`/api/admin/orders/${id}`, { method: "PATCH", body: { status } });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   if (error) return <p className="error">{error}</p>;
@@ -351,6 +367,7 @@ function Orders() {
 
 function Users() {
   const [users, setUsers] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editingId, setEditingId] = useState("");
@@ -359,8 +376,14 @@ function Users() {
 
   function load() {
     return api("/api/admin/users")
-      .then((data) => setUsers(data.users))
-      .catch((err) => setError(err.message));
+      .then((data) => {
+        setUsers(data.users);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoaded(true);
+      });
   }
 
   useEffect(() => {
@@ -399,7 +422,7 @@ function Users() {
     }
   }
 
-  if (!users.length && !error) return <Loading />;
+  if (!loaded) return <Loading />;
   if (error && !users.length) return <p className="error">{error}</p>;
 
   return (
@@ -408,6 +431,7 @@ function Users() {
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
       <ul className="admin-table">
+        {users.length === 0 && <li className="muted">No user accounts found.</li>}
         {users.map((user) => (
           <li key={user.id} className={editingId === user.id ? "is-editing" : ""}>
             {editingId === user.id ? (
@@ -490,8 +514,13 @@ function Moderation() {
   }, []);
 
   async function setStatus(id, status) {
-    await api(`/api/admin/posts/${id}`, { method: "PATCH", body: { status } });
-    load();
+    setError("");
+    try {
+      await api(`/api/admin/posts/${id}`, { method: "PATCH", body: { status } });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   if (error) return <p className="error">{error}</p>;
