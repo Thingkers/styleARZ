@@ -423,6 +423,9 @@ export default function Pos() {
   const [scanFlash, setScanFlash] = useState(null);
   const qrRef = useRef(null);
   const creatingRef = useRef(false);
+  const sessionRequestRef = useRef(0);
+  const processedEventIdsRef = useRef(new Set());
+  const cartSyncTokenRef = useRef(0);
   const hostPeerRef = useRef(null);
   const addBarcodeRef = useRef(null);
   const flashTimerRef = useRef(0);
@@ -451,8 +454,9 @@ export default function Pos() {
       const reasons = [...new Set(summary.conflicts.map((conflict) => conflict.reason.replace(/_/g, " ")))].join(", ");
       setError(`${conflicts} offline ${conflicts === 1 ? "sale needs" : "sales need"} review (${reasons}). Kept on this device.`);
     }
-    // Network drops retry on the next online event; only surface real server/auth errors.
-    if (summary.error && !isNetworkError(summary.error)) setError(summary.error.message);
+    if (summary.error && !isNetworkError(summary.error)) {
+      setError(summary.error.message);
+    }
   }, []);
 
   useEffect(() => {
@@ -485,15 +489,18 @@ export default function Pos() {
 
   const createSession = useCallback(async (nextMode) => {
     if (creatingRef.current || !navigator.onLine) return;
+    const requestId = ++sessionRequestRef.current;
     creatingRef.current = true;
     setError("");
     try {
       const result = await api("/api/pos/sessions", { method: "POST", body: { mode: nextMode } });
+      if (requestId !== sessionRequestRef.current) return;
       setSession(result.session);
     } catch (requestError) {
+      if (requestId !== sessionRequestRef.current) return;
       setError(requestError.message);
     } finally {
-      creatingRef.current = false;
+      if (requestId === sessionRequestRef.current) creatingRef.current = false;
     }
   }, []);
 
@@ -504,9 +511,16 @@ export default function Pos() {
       return;
     }
     if (session.mode !== mode) {
+      const updateId = ++sessionRequestRef.current;
       api(`/api/pos/sessions/${session.id}`, { method: "PATCH", body: { mode } })
-        .then(({ session: updated }) => setSession(updated))
-        .catch((requestError) => setError(requestError.message));
+        .then(({ session: updated }) => {
+          if (updateId !== sessionRequestRef.current) return;
+          setSession(updated);
+        })
+        .catch((requestError) => {
+          if (updateId !== sessionRequestRef.current) return;
+          setError(requestError.message);
+        });
     }
   }, [mode, session, online, createSession]);
 
@@ -535,16 +549,26 @@ export default function Pos() {
 
   useEffect(() => {
     if (!session || !online) return undefined;
+    const token = ++cartSyncTokenRef.current;
     const timer = window.setTimeout(() => {
       api(`/api/pos/sessions/${session.id}`, {
         method: "PATCH",
         body: { cart: cart.map(({ itemId, qty }) => ({ itemId, qty })) },
-      }).catch((requestError) => setError(requestError.message));
+      })
+        .then((result) => {
+          if (token !== cartSyncTokenRef.current || !result?.session) return;
+          setSession((current) => current && current.id === result.session.id ? result.session : current);
+        })
+        .catch((requestError) => {
+          if (token !== cartSyncTokenRef.current) return;
+          setError(requestError.message);
+        });
     }, 250);
     return () => window.clearTimeout(timer);
   }, [cart, session, online]);
 
   const addItem = useCallback((item) => {
+    if (!item || !item.id) return;
     rememberCatalogItems([item]);
     setCart((current) => {
       const found = current.find((line) => line.itemId === item.id);
@@ -630,6 +654,7 @@ export default function Pos() {
     setOfferPayload("");
     setAnswerDraft("");
     setWebrtcStatus("idle");
+    setNotice("");
   }
 
   useEffect(() => () => {
@@ -651,6 +676,9 @@ export default function Pos() {
         const result = await api(`/api/pos/sessions/${session.id}/events?since=${cursor}`);
         cursor = result.cursor;
         for (const event of result.events) {
+          const eventKey = event?.id ?? `${event?.type ?? "event"}-${event?.createdAt ?? event?.timestamp ?? "unknown"}`;
+          if (!eventKey || processedEventIdsRef.current.has(eventKey)) continue;
+          processedEventIdsRef.current.add(eventKey);
           if (event.item) addItem(event.item);
           else if (event.barcode) await addBarcode(event.barcode);
         }
@@ -664,12 +692,13 @@ export default function Pos() {
     return () => {
       stopped = true;
       window.clearTimeout(timer);
+      processedEventIdsRef.current.clear();
     };
   }, [mode, session, online, addItem, addBarcode]);
 
   function setQty(itemId, qty) {
     if (qty < 1) setCart((current) => current.filter((line) => line.itemId !== itemId));
-    else setCart((current) => current.map((line) => line.itemId === itemId ? { ...line, qty } : line));
+    else setCart((current) => current.map((line) => line.itemId === itemId ? { ...line, qty: Math.max(1, qty) } : line));
   }
 
   async function completeSale() {
@@ -679,6 +708,7 @@ export default function Pos() {
     setNotice("");
     const clientId = newClientId();
     const createdAt = new Date().toISOString();
+    const saleItems = cart.map(({ itemId, qty }) => ({ itemId, qty }));
 
     async function saveOffline() {
       await queueSale({ clientId, items: cart, paymentMethod, discount: discountNumber, createdAt });
@@ -697,7 +727,7 @@ export default function Pos() {
         method: "POST",
         body: {
           sessionId: session?.id,
-          items: cart.map(({ itemId, qty }) => ({ itemId, qty })),
+          items: saleItems,
           paymentMethod,
           clientId,
           discount: discountNumber,
@@ -710,7 +740,6 @@ export default function Pos() {
       setNotice(`Sale complete · ${result.sale.receiptNo}`);
     } catch (requestError) {
       if (isNetworkError(requestError)) {
-        // Connection dropped mid-request; the same clientId lets the server dedupe if it did go through.
         try {
           await saveOffline();
         } catch (queueError) {
