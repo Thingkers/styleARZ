@@ -12,30 +12,39 @@ export default function Home() {
   const [looks, setLooks] = useState([]);
   const [posts, setPosts] = useState([]);
   const [quiz, setQuiz] = useState(null);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState({
+    products: true,
+    collections: true,
+    looks: true,
+    posts: true,
+  });
+  const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    const saved = localStorage.getItem("sa-quiz");
-    if (saved) {
-      try {
-        setQuiz(JSON.parse(saved));
-      } catch {
-        localStorage.removeItem("sa-quiz");
+    try {
+      const saved = localStorage.getItem("sa-quiz");
+      if (saved) {
+        try {
+          setQuiz(JSON.parse(saved));
+        } catch {
+          localStorage.removeItem("sa-quiz");
+        }
       }
+    } catch (err) {
+      setErrors((current) => ({ ...current, quiz: err.message }));
     }
-    Promise.all([
-      api("/api/products?featured=1"),
-      api("/api/home-collections"),
-      api("/api/looks"),
-      api("/api/community"),
-    ])
-      .then(([productData, collectionData, lookData, postData]) => {
-        setProducts(productData.products);
-        setCollections(collectionData.collections || []);
-        setLooks(lookData.looks);
-        setPosts(postData.posts.slice(0, 3));
-      })
-      .catch((err) => setError(err.message));
+
+    function loadSection(section, path, onSuccess) {
+      api(path)
+        .then(onSuccess)
+        .catch((err) => setErrors((current) => ({ ...current, [section]: err.message })))
+        .finally(() => setLoading((current) => ({ ...current, [section]: false })));
+    }
+
+    loadSection("products", "/api/products?featured=1", (data) => setProducts(data.products));
+    loadSection("collections", "/api/home-collections", (data) => setCollections(data.collections || []));
+    loadSection("looks", "/api/looks", (data) => setLooks(data.looks));
+    loadSection("posts", "/api/community", (data) => setPosts(data.posts.slice(0, 3)));
   }, []);
 
   return (
@@ -75,6 +84,11 @@ export default function Home() {
       </ul>
 
       <section className="wrap collections">
+        {errors.collections && <p className="error">{errors.collections}</p>}
+        {loading.collections && <Loading />}
+        {!loading.collections && !errors.collections && collections.length === 0 && (
+          <p className="notice">No collections are available right now.</p>
+        )}
         {collections.map((entry) => (
           <Link key={entry.id} to={`/shop?audience=${encodeURIComponent(entry.audience)}`} className="collection-card">
             <img src={entry.image} alt={`${entry.kicker} export casuals`} />
@@ -98,6 +112,7 @@ export default function Home() {
           </Link>
         </section>
       )}
+      {errors.quiz && <p className="wrap error">{errors.quiz}</p>}
 
       <section className="wrap reveal">
         <div className="section-head">
@@ -107,8 +122,11 @@ export default function Home() {
           </div>
           <Link to="/shop">View all</Link>
         </div>
-        {error && <p className="error">{error}</p>}
-        {!error && products.length === 0 && <Loading />}
+        {errors.products && <p className="error">{errors.products}</p>}
+        {loading.products && <Loading />}
+        {!loading.products && !errors.products && products.length === 0 && (
+          <p className="notice">No featured products are available right now.</p>
+        )}
         <div className="product-grid">
           {products.map((product) => (
             <ProductCard key={product.id} product={product} />
@@ -124,6 +142,11 @@ export default function Home() {
           </div>
           <Link to="/lookbook">Open lookbook</Link>
         </div>
+        {errors.looks && <p className="error">{errors.looks}</p>}
+        {loading.looks && <Loading />}
+        {!loading.looks && !errors.looks && looks.length === 0 && (
+          <p className="notice">No looks are available right now.</p>
+        )}
         <div className="occasion-grid">
           {looks.map((look) => (
             <Link key={look.id} to={`/lookbook/${look.id}`} className="occasion-card">
@@ -169,6 +192,11 @@ export default function Home() {
           </div>
           <Link to="/community">Community</Link>
         </div>
+        {errors.posts && <p className="error">{errors.posts}</p>}
+        {loading.posts && <Loading />}
+        {!loading.posts && !errors.posts && posts.length === 0 && (
+          <p className="notice">No community notes are available right now.</p>
+        )}
         <div className="feed home-feed">
           {posts.map((post) => (
             <article key={post.id}>
