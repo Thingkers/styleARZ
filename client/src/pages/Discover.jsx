@@ -12,11 +12,13 @@ export function Lookbook() {
   useDocumentTitle("Lookbook");
   const [looks, setLooks] = useState([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api("/api/looks")
       .then((data) => setLooks(data.looks))
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -27,7 +29,8 @@ export function Lookbook() {
         lede="Choose a day. Each look opens into the pieces, ready to adjust in the studio."
       />
       {error && <p className="error">{error}</p>}
-      {looks.length === 0 && !error && <Loading />}
+      {loading && <Loading />}
+      {!loading && !error && looks.length === 0 && <p className="notice">No looks are available right now.</p>}
       <div className="occasion-grid large">
         {looks.map((look) => (
           <Link key={look.id} to={`/lookbook/${look.id}`} className="occasion-card">
@@ -60,6 +63,7 @@ export function CompleteLook() {
   function addAll() {
     if (!data) return;
     let added = 0;
+    const failures = [];
     data.products.forEach((product) => {
       try {
         addToCart(product, {
@@ -69,10 +73,20 @@ export function CompleteLook() {
         });
         added += 1;
       } catch (err) {
-        notify(err.message);
+        failures.push(err.message);
       }
     });
-    if (added) notify("Look added to the bag. Review sizes before checkout.");
+    if (failures.length) {
+      notify(
+        added
+          ? `Added ${added} of ${data.products.length} pieces. ${failures[0]}`
+          : `Could not add the look. ${failures[0]}`
+      );
+    } else if (added) {
+      notify("Look added to the bag. Review sizes before checkout.");
+    } else {
+      notify("This look has no pieces to add.");
+    }
   }
 
   if (error) return <div className="page wrap"><p className="error">{error}</p></div>;
@@ -122,11 +136,20 @@ export function Community() {
   const [posts, setPosts] = useState([]);
   const [form, setForm] = useState({ title: "", body: "" });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [liking, setLiking] = useState(() => new Set());
 
-  function load() {
-    api("/api/community")
-      .then((data) => setPosts(data.posts))
-      .catch((err) => setError(err.message));
+  async function load() {
+    setError("");
+    try {
+      const data = await api("/api/community");
+      setPosts(data.posts);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -136,18 +159,33 @@ export function Community() {
   async function publish(event) {
     event.preventDefault();
     setError("");
+    setPublishing(true);
     try {
-      await api("/api/community", { method: "POST", body: form });
+      const data = await api("/api/community", { method: "POST", body: form });
+      setPosts((current) => [data.post, ...current]);
       setForm({ title: "", body: "" });
-      load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setPublishing(false);
     }
   }
 
   async function like(postId) {
-    const data = await api(`/api/community/${postId}/like`, { method: "POST" });
-    setPosts((current) => current.map((post) => (post.id === postId ? { ...post, likes: data.likes } : post)));
+    setError("");
+    setLiking((current) => new Set(current).add(postId));
+    try {
+      const data = await api(`/api/community/${postId}/like`, { method: "POST" });
+      setPosts((current) => current.map((post) => (post.id === postId ? { ...post, likes: data.likes } : post)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLiking((current) => {
+        const next = new Set(current);
+        next.delete(postId);
+        return next;
+      });
+    }
   }
 
   return (
@@ -168,7 +206,9 @@ export function Community() {
             Note
             <textarea rows="3" value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} required />
           </label>
-          <button className="btn dark" type="submit">Publish note</button>
+          <button className="btn dark" type="submit" disabled={publishing}>
+            {publishing ? "Publishing…" : "Publish note"}
+          </button>
         </form>
       ) : (
         <p className="notice">
@@ -176,6 +216,8 @@ export function Community() {
         </p>
       )}
       <div className="feed">
+        {loading && <Loading />}
+        {!loading && !error && posts.length === 0 && <p className="notice">No community notes yet. Be the first to share one.</p>}
         {posts.map((post) => (
           <article key={post.id}>
             <img src={post.image} alt="" />
@@ -183,8 +225,13 @@ export function Community() {
               <p className="kicker">{post.author} · {prettyDate(post.createdAt)}</p>
               <h2>{post.title}</h2>
               <p>{post.body}</p>
-              <button type="button" className="text-link" onClick={() => like(post.id)}>
-                Appreciate · {post.likes}
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => like(post.id)}
+                disabled={liking.has(post.id)}
+              >
+                {liking.has(post.id) ? "Updating…" : `Appreciate · ${post.likes}`}
               </button>
             </div>
           </article>
