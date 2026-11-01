@@ -38,6 +38,32 @@ export default function PosScan() {
   const [capturing, setCapturing] = useState(false);
   const [scanHint, setScanHint] = useState("");
 
+  function stopCameraScanner() {
+    sessionRef.current?.stop();
+    sessionRef.current = null;
+    setCameraOn(false);
+  }
+
+  function resetPairingState({ keepDraft = false } = {}) {
+    if (offerScanRef.current) {
+      offerScanRef.current.stop();
+      offerScanRef.current = null;
+    }
+    if (scannerPeerRef.current) {
+      scannerPeerRef.current.close();
+      scannerPeerRef.current = null;
+    }
+    setAnswerPayload("");
+    setPairHint("");
+    setCopyNotice("");
+    setShowText(false);
+    setScanningOffer(false);
+    if (!keepDraft) setOfferDraft("");
+    setRtcStatus("idle");
+  }
+
+  const peerConnected = Boolean(scannerPeerRef.current?.connected) || rtcStatus === "connected";
+
   useEffect(() => {
     const update = () => {
       const next = navigator.onLine;
@@ -53,8 +79,8 @@ export default function PosScan() {
   }, []);
 
   useEffect(() => () => {
-    scannerPeerRef.current?.close();
-    offerScanRef.current?.stop();
+    stopCameraScanner();
+    resetPairingState();
   }, []);
 
   useEffect(() => {
@@ -70,9 +96,11 @@ export default function PosScan() {
 
   async function join(value = code) {
     const normalized = String(value || "").trim().toUpperCase();
-    if (!normalized) return;
+    if (!normalized || normalized.length !== 6) return;
     setBusy(true);
     setError("");
+    stopCameraScanner();
+    resetPairingState({ keepDraft: false });
     try {
       const result = await api(`/api/pos/sessions/${encodeURIComponent(normalized)}`);
       setCode(normalized);
@@ -89,7 +117,7 @@ export default function PosScan() {
 
   useEffect(() => {
     const queryCode = String(params.get("c") || "").trim();
-    if (queryCode && navigator.onLine) join(queryCode);
+    if (queryCode && queryCode.length === 6 && navigator.onLine) join(queryCode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -104,10 +132,8 @@ export default function PosScan() {
     setAnswerPayload("");
     setOfferDraft(payload);
     try {
-      offerScanRef.current?.stop();
-      offerScanRef.current = null;
+      resetPairingState({ keepDraft: true });
       setScanningOffer(false);
-      scannerPeerRef.current?.close();
       setRtcStatus("answering");
       const peer = await createScannerPeer({ onStatus: setRtcStatus });
       scannerPeerRef.current = peer;
@@ -210,11 +236,11 @@ export default function PosScan() {
     if (!value || busy || sendingRef.current) return;
     sendingRef.current = true;
 
-    if (offlineMode || scannerPeerRef.current?.connected) {
+    if (offlineMode || peerConnected) {
       setBusy(true);
       setError("");
       try {
-        if (!scannerPeerRef.current?.connected) {
+        if (!scannerPeerRef.current?.connected && rtcStatus !== "connected") {
           throw new Error("Offline link is not connected yet. Scan the answer QR on the register.");
         }
         scannerPeerRef.current.sendBarcode(value);
@@ -255,7 +281,7 @@ export default function PosScan() {
   }
   submitRef.current = submitBarcode;
 
-  const canScan = Boolean(session) || scannerPeerRef.current?.connected || rtcStatus === "connected";
+  const canScan = Boolean(session) || peerConnected;
 
   useEffect(() => {
     if (!cameraOn || !canScan) return undefined;
@@ -329,8 +355,10 @@ export default function PosScan() {
           className={!offlineMode ? "active" : ""}
           onClick={() => {
             setOfflineMode(false);
-            scannerPeerRef.current?.close();
-            setRtcStatus("idle");
+            stopCameraScanner();
+            resetPairingState();
+            setSession(null);
+            setMessage("");
           }}
           disabled={!online}
         >
@@ -341,7 +369,10 @@ export default function PosScan() {
           className={offlineMode ? "active" : ""}
           onClick={() => {
             setOfflineMode(true);
+            stopCameraScanner();
+            resetPairingState();
             setSession(null);
+            setMessage("");
           }}
         >
           Offline WebRTC
