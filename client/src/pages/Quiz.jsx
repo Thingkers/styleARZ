@@ -5,6 +5,7 @@ import { useDocumentTitle } from "../hooks";
 import { money } from "../format";
 import ProductCard from "../components/ProductCard";
 import { PageHeader } from "../components/ui";
+import { clearStoredQuiz, readStoredQuiz, writeStoredQuiz } from "../quizStore";
 
 const STEPS = [
   {
@@ -60,25 +61,29 @@ export function Quiz() {
 
   function choose(value) {
     setAnswers((prev) => ({ ...prev, [current.key]: value }));
+    setError("");
   }
 
   async function next() {
-    if (!answers[current.key]) {
+    const currentAnswer = answers[current.key];
+    if (!currentAnswer) {
       setError("Choose one to continue.");
       return;
     }
     setError("");
     if (step < STEPS.length - 1) {
-      setStep(step + 1);
+      setStep((prev) => prev + 1);
       return;
     }
     setBusy(true);
     try {
       const data = await api("/api/quiz", { method: "POST", body: { answers } });
-      localStorage.setItem("sa-quiz", JSON.stringify(data));
+      if (!writeStoredQuiz(data)) {
+        throw new Error("Your browser blocked saving your edit. Please try again.");
+      }
       navigate("/quiz/results");
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Could not prepare your edit.");
     } finally {
       setBusy(false);
     }
@@ -111,7 +116,7 @@ export function Quiz() {
       {error && <p className="error">{error}</p>}
       <div className="hero-actions">
         {step > 0 && (
-          <button type="button" className="btn line" onClick={() => setStep(step - 1)}>
+          <button type="button" className="btn line" onClick={() => setStep((prev) => prev - 1)}>
             Back
           </button>
         )}
@@ -126,12 +131,7 @@ export function Quiz() {
 
 export function QuizResults() {
   useDocumentTitle("Your edit");
-  let saved = null;
-  try {
-    saved = JSON.parse(localStorage.getItem("sa-quiz") || "null");
-  } catch {
-    saved = null;
-  }
+  const saved = readStoredQuiz();
   const result = saved?.result;
   const products = saved?.products || [];
 
@@ -147,7 +147,13 @@ export function QuizResults() {
   return (
     <div className="page wrap">
       <PageHeader kicker="Your edit" title={result.title} lede={result.summary}>
-        <Link className="btn line" to="/quiz">Retake</Link>
+        <Link
+          className="btn line"
+          to="/quiz"
+          onClick={() => clearStoredQuiz()}
+        >
+          Retake
+        </Link>
       </PageHeader>
       <ul className="answer-row">
         {Object.entries(result.answers || {}).map(([key, value]) => (
