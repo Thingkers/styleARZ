@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
 import { Loading } from "../components/ui";
+import { readStoredQuiz } from "../quizStore";
 
 export default function Home() {
   useDocumentTitle("");
@@ -22,13 +23,9 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("sa-quiz");
+      const saved = readStoredQuiz();
       if (saved) {
-        try {
-          setQuiz(JSON.parse(saved));
-        } catch {
-          localStorage.removeItem("sa-quiz");
-        }
+        setQuiz(saved);
       }
     } catch (err) {
       setErrors((current) => ({ ...current, quiz: err.message }));
