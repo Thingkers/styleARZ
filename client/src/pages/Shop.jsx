@@ -5,6 +5,8 @@ import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
 import { Empty, Loading, PageHeader } from "../components/ui";
 
+const isStringArray = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
+
 export default function Shop() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") || "";
@@ -16,25 +18,64 @@ export default function Shop() {
   const [sort, setSort] = useState("featured");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [metaError, setMetaError] = useState("");
   useDocumentTitle(q ? `Search · ${q}` : "Shop");
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
+    setError("");
     const query = new URLSearchParams();
     if (q) query.set("q", q);
     if (category) query.set("category", category);
     if (occasion) query.set("occasion", occasion);
     if (audience) query.set("audience", audience);
     api(`/api/products?${query.toString()}`)
-      .then((data) => setProducts(data.products))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!Array.isArray(data?.products)) {
+          throw new Error("The product list could not be loaded.");
+        }
+        if (active) setProducts(data.products);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setProducts([]);
+        setError(err?.message || "Could not load products. Please try again.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [q, category, occasion, audience]);
 
   useEffect(() => {
+    let active = true;
     api("/api/meta")
-      .then(setMeta)
-      .catch(() => {});
+      .then((data) => {
+        if (
+          !isStringArray(data?.categories) ||
+          !isStringArray(data?.occasions) ||
+          (data.audiences !== undefined && !isStringArray(data.audiences))
+        ) {
+          throw new Error("Filter options could not be loaded.");
+        }
+        if (!active) return;
+        setMeta({
+          categories: data.categories,
+          occasions: data.occasions,
+          audiences: Array.isArray(data.audiences) ? data.audiences : ["Men", "Women", "Children"],
+        });
+      })
+      .catch((err) => {
+        if (active) setMetaError(err?.message || "Filter options could not be loaded.");
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const visible = useMemo(() => {
@@ -59,6 +100,7 @@ export default function Shop() {
         title={q ? `Results for “${q}”` : audience ? `${audience}'s collection` : "The edit"}
         lede="Grade A export pieces for men, women, and children. Finished in Bangladesh, priced in taka."
       />
+      {metaError && <p className="error">{metaError}</p>}
       <div className="filters">
         <div className="pills" role="tablist" aria-label="Collections">
           <button type="button" className={!audience ? "on" : ""} onClick={() => setFilter("audience", "")}>
@@ -113,14 +155,16 @@ export default function Shop() {
       </div>
       {error && <p className="error">{error}</p>}
       {loading && <Loading />}
-      {!loading && visible.length === 0 && (
+      {!loading && !error && visible.length === 0 && (
         <Empty title="Nothing matches" text="Try another category, or clear the search." />
       )}
-      <div className="product-grid">
-        {visible.map((product) => (
-          <ProductCard key={product.id} product={product} />
-        ))}
-      </div>
+      {!loading && !error && (
+        <div className="product-grid">
+          {visible.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
