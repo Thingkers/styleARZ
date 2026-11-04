@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { money } from "../format";
@@ -7,7 +7,7 @@ import { useDocumentTitle } from "../hooks";
 import { useAuth } from "../context/AuthContext";
 import { useShop } from "../context/ShopContext";
 import { PALETTE, compareColours } from "../palette";
-import { PageHeader } from "../components/ui";
+import { Loading, PageHeader } from "../components/ui";
 
 const SLOTS = [
   { id: "layer", label: "Layer" },
@@ -16,42 +16,102 @@ const SLOTS = [
   { id: "dress", label: "Dress" },
   { id: "shoes", label: "Shoes" },
   { id: "accessory", label: "Accessory" },
+  { id: "other", label: "Other" },
 ];
 
 export function Studio() {
   useDocumentTitle("Style Studio");
   const { user } = useAuth();
-  const { addToCart, notify } = useShop();
+  const { addManyToCart, notify } = useShop();
   const [params] = useSearchParams();
+  const lookId = params.get("look");
   const [products, setProducts] = useState([]);
   const [wardrobe, setWardrobe] = useState([]);
   const [active, setActive] = useState("top");
   const [slots, setSlots] = useState({});
   const [name, setName] = useState("Untitled look");
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [errors, setErrors] = useState([]);
+  const [wardrobeError, setWardrobeError] = useState("");
+  const lookEdited = useRef(false);
+  const nameEdited = useRef(false);
 
   useEffect(() => {
-    api("/api/products").then((data) => setProducts(data.products));
-    const lookId = params.get("look");
-    if (lookId) {
-      api(`/api/looks/${lookId}`).then((data) => {
-        const next = {};
-        data.products.forEach((product) => {
-          next[product.slot] = product.id;
-        });
-        setSlots(next);
-        setName(data.look.name);
+    let activeRequest = true;
+    lookEdited.current = false;
+    nameEdited.current = false;
+    setErrors([]);
+    setLoadingProducts(true);
+    setProducts([]);
+    api("/api/products")
+      .then((data) => {
+        if (!Array.isArray(data?.products)) throw new Error("The product list could not be loaded.");
+        if (activeRequest) setProducts(data.products);
+      })
+      .catch((err) => {
+        if (activeRequest) {
+          setProducts([]);
+          setErrors((current) => [...current, err?.message || "Could not load products."]);
+        }
+      })
+      .finally(() => {
+        if (activeRequest) setLoadingProducts(false);
       });
+
+    if (lookId) {
+      api(`/api/looks/${encodeURIComponent(lookId)}`)
+        .then((data) => {
+          if (!Array.isArray(data?.products) || !data.look || typeof data.look.name !== "string") {
+            throw new Error("This saved look could not be loaded.");
+          }
+          if (!activeRequest || lookEdited.current) return;
+          const next = {};
+          data.products.forEach((product) => {
+            if (product && typeof product.id === "string" && SLOTS.some((slot) => slot.id === product.slot)) {
+              next[product.slot] = product.id;
+            }
+          });
+          setSlots(next);
+          if (!nameEdited.current) setName(data.look.name);
+        })
+        .catch((err) => {
+          if (activeRequest) {
+            setErrors((current) => [...current, err?.message || "Could not load this look."]);
+          }
+        });
+    } else {
+      setSlots({});
+      setName("Untitled look");
     }
-  }, [params]);
+
+    return () => {
+      activeRequest = false;
+    };
+  }, [lookId]);
 
   useEffect(() => {
+    let activeRequest = true;
+    setWardrobeError("");
     if (!user) {
       setWardrobe([]);
-      return;
+      return () => {
+        activeRequest = false;
+      };
     }
     api("/api/wardrobe")
-      .then((data) => setWardrobe(data.items))
-      .catch(() => {});
+      .then((data) => {
+        if (!Array.isArray(data?.items)) throw new Error("Your wardrobe could not be loaded.");
+        if (activeRequest) setWardrobe(data.items);
+      })
+      .catch((err) => {
+        if (!activeRequest) return;
+        setWardrobe([]);
+        setWardrobeError(err?.message || "Could not load your wardrobe.");
+      });
+
+    return () => {
+      activeRequest = false;
+    };
   }, [user]);
 
   const chosen = useMemo(() => {
@@ -65,9 +125,10 @@ export function Studio() {
   }, [slots, products, wardrobe]);
 
   const total = chosen.reduce((sum, entry) => sum + (entry.owned ? 0 : entry.item.price || 0), 0);
-  const options = products.filter((product) => product.slot === active);
+  const options = products.filter((product) => getProductSlot(product) === active);
 
   function choose(id) {
+    lookEdited.current = true;
     setSlots((current) => ({ ...current, [active]: current[active] === id ? undefined : id }));
   }
 
@@ -85,19 +146,14 @@ export function Studio() {
   }
 
   function shopLook() {
-    chosen
+    addManyToCart(chosen
       .filter((entry) => !entry.owned)
-      .forEach((entry) => {
-        try {
-          addToCart(entry.item, {
-            size: defaultSize(entry.item),
-            color: entry.item.colors[0].name,
-            qty: 1,
-          });
-        } catch (err) {
-          notify(err.message);
-        }
-      });
+      .map((entry) => ({
+        product: entry.item,
+        size: defaultSize(entry.item),
+        color: entry.item.colors?.[0]?.name,
+        qty: 1,
+      })));
   }
 
   const colours = chosen.flatMap((entry) => {
@@ -117,11 +173,18 @@ export function Studio() {
           <Link className="btn line" to="/studio/budget">Budget builder</Link>
         </div>
       </PageHeader>
+      {errors.map((message, index) => <p className="error" key={`${index}-${message}`}>{message}</p>)}
       <div className="studio">
         <div className="board">
           <label>
             Look name
-            <input value={name} onChange={(event) => setName(event.target.value)} />
+            <input
+              value={name}
+              onChange={(event) => {
+                nameEdited.current = true;
+                setName(event.target.value);
+              }}
+            />
           </label>
           <ul className="slot-list">
             {SLOTS.map((slot) => {
@@ -165,9 +228,11 @@ export function Studio() {
               </button>
             ))}
           </div>
+          {wardrobeError && <p className="error">{wardrobeError}</p>}
+          {loadingProducts && <Loading />}
           <div className="picker">
             {wardrobe
-              .filter((item) => item.category.toLowerCase().includes(active === "layer" ? "outer" : active) || matchWardrobe(item, active))
+              .filter((item) => matchWardrobe(item, active))
               .map((item) => (
                 <button key={item.id} type="button" className={slots[active] === item.id ? "on owned" : "owned"} onClick={() => choose(item.id)}>
                   <i style={{ background: item.hex }} />
@@ -176,10 +241,16 @@ export function Studio() {
                 </button>
               ))}
             {options.map((product) => (
-              <button key={product.id} type="button" className={slots[active] === product.id ? "on" : ""} onClick={() => choose(product.id)}>
+              <button
+                key={product.id}
+                type="button"
+                className={slots[active] === product.id ? "on" : ""}
+                disabled={!Number.isFinite(Number(product.stock)) || Number(product.stock) < 1}
+                onClick={() => choose(product.id)}
+              >
                 <img src={product.image} alt="" />
                 <span>{product.name}</span>
-                <em>{money(product.price)}</em>
+                <em>{Number(product.stock) > 0 ? money(product.price) : "Out of stock"}</em>
               </button>
             ))}
           </div>
@@ -190,22 +261,48 @@ export function Studio() {
 }
 
 function matchWardrobe(item, slot) {
-  const category = item.category.toLowerCase();
-  if (slot === "layer") return category.includes("outer") || category.includes("tailor");
-  if (slot === "top") return category.includes("shirt") || category.includes("knit");
-  if (slot === "bottom") return category.includes("trouser") || category.includes("jean");
-  if (slot === "shoes") return category.includes("foot") || category.includes("shoe");
-  if (slot === "accessory") return category.includes("access");
-  return false;
+  return getCategorySlot(item?.category) === slot;
+}
+
+function getCategorySlot(category) {
+  const value = String(category || "").toLowerCase();
+  if (value.includes("outer") || value.includes("tailor")) return "layer";
+  if (value.includes("shirt") || value.includes("knit")) return "top";
+  if (value.includes("trouser") || value.includes("jean")) return "bottom";
+  if (value.includes("dress")) return "dress";
+  if (value.includes("foot") || value.includes("shoe")) return "shoes";
+  if (value.includes("access")) return "accessory";
+  return "other";
+}
+
+function getProductSlot(product) {
+  if (product.slot && product.slot !== "other" && SLOTS.some((slot) => slot.id === product.slot)) {
+    return product.slot;
+  }
+  return getCategorySlot(product.category);
 }
 
 export function ColourMatch() {
   useDocumentTitle("Colour match");
-  const [params] = useSearchParams();
-  const initialA = PALETTE.find((color) => color.name === params.get("a")) || PALETTE[0];
-  const initialB = PALETTE.find((color) => color.name === params.get("b")) || PALETTE[4];
+  const [params, setParams] = useSearchParams();
+  const colorA = params.get("a");
+  const colorB = params.get("b");
+  const initialA = PALETTE.find((color) => color.name === colorA) || PALETTE[0];
+  const initialB = PALETTE.find((color) => color.name === colorB) || PALETTE[4];
   const [a, setA] = useState(initialA);
   const [b, setB] = useState(initialB);
+  useEffect(() => {
+    setA(PALETTE.find((color) => color.name === colorA) || PALETTE[0]);
+    setB(PALETTE.find((color) => color.name === colorB) || PALETTE[4]);
+  }, [colorA, colorB]);
+
+  function updateColour(key, color, setColor) {
+    setColor(color);
+    const next = new URLSearchParams(params);
+    next.set(key, color.name);
+    setParams(next, { replace: true });
+  }
+
   const result = compareColours(a, b);
 
   return (
@@ -228,8 +325,8 @@ export function ColourMatch() {
         <p>{result.note}</p>
       </div>
       <div className="colour-pick">
-        <Palette label="First tone" value={a} onChange={setA} />
-        <Palette label="Second tone" value={b} onChange={setB} />
+        <Palette label="First tone" value={a} onChange={(color) => updateColour("a", color, setA)} />
+        <Palette label="Second tone" value={b} onChange={(color) => updateColour("b", color, setB)} />
       </div>
     </div>
   );
@@ -253,41 +350,47 @@ function Palette({ label, value, onChange }) {
 
 export function Budget() {
   useDocumentTitle("Budget builder");
-  const { addToCart, notify } = useShop();
+  const { addManyToCart } = useShop();
   const [budget, setBudget] = useState(15000);
   const [occasion, setOccasion] = useState("Office");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [building, setBuilding] = useState(false);
+  const buildSequence = useRef(0);
 
   async function build(event) {
     event?.preventDefault();
+    const sequence = ++buildSequence.current;
+    setBuilding(true);
+    setResult(null);
     setError("");
     try {
       const data = await api("/api/studio/budget", { method: "POST", body: { budget, occasion } });
-      setResult(data);
+      if (!Array.isArray(data?.items)) throw new Error("The outfit suggestion could not be loaded.");
+      if (sequence === buildSequence.current) setResult(data);
     } catch (err) {
-      setError(err.message);
+      if (sequence === buildSequence.current) {
+        setError(err?.message || "Could not build an outfit. Please try again.");
+      }
+    } finally {
+      if (sequence === buildSequence.current) setBuilding(false);
     }
   }
 
   useEffect(() => {
     build();
-    // Initial suggestion for the default budget.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      buildSequence.current += 1;
+    };
   }, []);
 
   function addAll() {
-    result?.items.forEach((product) => {
-      try {
-        addToCart(product, {
-          size: defaultSize(product),
-          color: product.colors[0].name,
-          qty: 1,
-        });
-      } catch (err) {
-        notify(err.message);
-      }
-    });
+    addManyToCart(result?.items.map((product) => ({
+      product,
+      size: defaultSize(product),
+      color: product.colors?.[0]?.name,
+      qty: 1,
+    })) || []);
   }
 
   return (
@@ -310,9 +413,12 @@ export function Budget() {
             ))}
           </select>
         </label>
-        <button className="btn dark" type="submit">Build</button>
+        <button className="btn dark" type="submit" disabled={building}>
+          {building ? "Building..." : "Build"}
+        </button>
       </form>
       {error && <p className="error">{error}</p>}
+      {building && <Loading />}
       {result && (
         <div>
           <p className="notice">
