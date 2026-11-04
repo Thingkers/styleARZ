@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
+import { CategoryGlyph } from "../components/CategoryIcons";
 import { Empty, Loading, PageHeader } from "../components/ui";
 
 export default function Shop() {
@@ -75,18 +76,19 @@ export default function Shop() {
             </button>
           ))}
         </div>
-        <div className="pills" role="tablist" aria-label="Categories">
-          <button type="button" className={!category ? "on" : ""} onClick={() => setFilter("category", "")}>
-            All
+        <div className="category-filter" role="tablist" aria-label="Categories">
+          <button type="button" className={`category-filter-btn ${!category ? "on" : ""}`} onClick={() => setFilter("category", "")}>
+            <span className="category-filter-all">All</span>
           </button>
           {meta.categories.map((item) => (
             <button
               key={item}
               type="button"
-              className={category === item ? "on" : ""}
+              className={`category-filter-btn ${category === item ? "on" : ""}`}
               onClick={() => setFilter("category", item)}
             >
-              {item}
+              <CategoryGlyph name={item} />
+              <span>{item}</span>
             </button>
           ))}
         </div>

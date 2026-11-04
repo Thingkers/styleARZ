@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
+import { FEATURED_CATEGORIES } from "./CategoryIcons";
 import { useAuth } from "../context/AuthContext";
 import { useShop } from "../context/ShopContext";
 import { api } from "../api";
@@ -233,9 +234,13 @@ export default function Layout({ children }) {
           <div>
             <h2>Shop</h2>
             <Link to="/shop">All casuals</Link>
+            {FEATURED_CATEGORIES.map(({ key, label }) => (
+              <Link key={key} to={`/shop?category=${encodeURIComponent(key)}`}>
+                {label}
+              </Link>
+            ))}
             <Link to="/shop?audience=Men">Men</Link>
             <Link to="/shop?audience=Women">Women</Link>
-            <Link to="/shop?audience=Children">Children</Link>
           </div>
           <div>
             <h2>Studio</h2>

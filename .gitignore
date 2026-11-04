@@ -35,3 +35,4 @@ styleArz-server.pdf
 .vscode/
 *.swp
 *~
+.venv-img

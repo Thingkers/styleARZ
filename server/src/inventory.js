@@ -14,6 +14,12 @@ const IMAGE_TYPES = {
 const IMAGE_URL_PREFIX = "/uploads/inventory/";
 
 const DEFAULT_CATEGORIES = [
+  "Saree",
+  "Panjabi",
+  "Dress",
+  "Jeans",
+  "Shirt",
+  "T-Shirt",
   "Shirts",
   "Knitwear",
   "Trousers",

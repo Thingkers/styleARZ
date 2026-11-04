@@ -497,7 +497,7 @@ function buildSeed() {
     inventoryItems,
     inventorySeq: 1004,
     inventoryDeleted: [],
-    inventoryCategories: ["Shirts", "Knitwear", "Trousers", "Outerwear", "Dresses", "Sets", "Accessories"],
+    inventoryCategories: ["Saree", "Panjabi", "Dress", "Jeans", "Shirt", "T-Shirt", "Shirts", "Knitwear", "Trousers", "Outerwear", "Dresses", "Sets", "Accessories"],
     posSessions: [],
     posScanEvents: [],
     posSales: [],

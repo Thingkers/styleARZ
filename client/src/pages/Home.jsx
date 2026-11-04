@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
 import { Loading } from "../components/ui";
+import { FEATURED_CATEGORIES } from "../components/CategoryIcons";
 
 export default function Home() {
   useDocumentTitle("");
@@ -41,28 +42,45 @@ export default function Home() {
   return (
     <div className="home">
       <section className="hero">
-        <div className="hero-media" aria-hidden="true">
-          <span className="hero-pane hero-pane-style" />
-          <span className="hero-pane hero-pane-arz" />
-        </div>
-        <div className="hero-copy">
-          <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
-            <span className="logo-style">STYLE</span>
-            <span className="logo-arz">ARZ</span>
-          </span>
-          <p className="hero-tag">your personal fashion statement</p>
-          <h1>Export casuals, made for how Bangladesh dresses.</h1>
-          <p className="hero-lede">
-            Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
-            specs, priced for everyday.
-          </p>
-          <div className="hero-actions">
-            <Link className="btn solid" to="/shop">
-              Shop casuals
-            </Link>
-            <Link className="btn line light" to="/quiz">
-              Take the style quiz
-            </Link>
+        <div className="hero-media" aria-hidden="true" />
+        <aside className="hero-rail" aria-label="Shop by category">
+          <ul className="rail-icons">
+            {FEATURED_CATEGORIES.map(({ key, label, src }) => (
+              <li key={key}>
+                <Link to={`/shop?category=${encodeURIComponent(key)}`} className="rail-icon" aria-label={label}>
+                  <span className="rail-icon-disc" aria-hidden="true">
+                    <img src={src} alt="" width={56} height={56} decoding="async" />
+                  </span>
+                  <span className="rail-icon-label">{label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </aside>
+        <div className="hero-layout">
+          <div className="hero-copy">
+            <div className="hero-brand">
+              <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
+                <span className="logo-style">STYLE</span>
+                <span className="logo-arz">ARZ</span>
+              </span>
+              <p className="hero-tag">your personal fashion statement</p>
+            </div>
+            <h1>Export casuals, made for how Bangladesh dresses.</h1>
+          </div>
+          <div className="hero-side">
+            <p className="hero-lede">
+              Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
+              specs, priced for everyday.
+            </p>
+            <div className="hero-actions">
+              <Link className="btn solid" to="/shop">
+                Shop casuals
+              </Link>
+              <Link className="btn line light" to="/quiz">
+                Take the style quiz
+              </Link>
+            </div>
           </div>
         </div>
       </section>
