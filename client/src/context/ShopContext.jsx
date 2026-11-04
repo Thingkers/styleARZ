@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "./AuthContext";
 
@@ -71,6 +71,7 @@ function readGuestWishlist() {
 export function ShopProvider({ children }) {
   const { user, ready: authReady } = useAuth();
   const [cart, setCart] = useState(readCart);
+  const cartRef = useRef(cart);
   const [wishlist, setWishlist] = useState(() => cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY)));
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
@@ -126,20 +127,25 @@ export function ShopProvider({ children }) {
     setToast(message);
   }
 
-  function addToCart(product, { size, color, qty = 1 }) {
+  function commitCart(next) {
+    cartRef.current = next;
+    setCart(next);
+  }
+
+  function addProductToCart(current, product, { size, color, qty = 1 }) {
     if (!size || !color) throw new Error("Choose a size and a colour.");
     if (!Number.isInteger(qty) || qty < 1) throw new Error("Choose a valid quantity.");
     const stock = Number(product.stock);
     if (!Number.isFinite(stock) || stock < 1) throw new Error("This piece is currently out of stock.");
-    const index = cart.findIndex(
+    const index = current.findIndex(
       (item) => item.productId === product.id && item.size === size && item.color === color
     );
-    const existingQty = index >= 0 ? cart[index].qty : 0;
+    const existingQty = index >= 0 ? current[index].qty : 0;
     const maxQty = Math.min(MAX_CART_QUANTITY, stock);
     if (existingQty + qty > maxQty) {
       throw new Error(`You can add up to ${maxQty} of this piece.`);
     }
-    const next = cart.slice();
+    const next = current.slice();
     if (index >= 0) next[index] = { ...next[index], qty: existingQty + qty };
     else {
       next.push({
@@ -153,42 +159,70 @@ export function ShopProvider({ children }) {
         qty,
       });
     }
-    setCart(next);
+    return next;
+  }
+
+  function addToCart(product, options) {
+    const next = addProductToCart(cartRef.current, product, options);
+    commitCart(next);
     setDrawer(true);
     notify(`${product.name} added to the bag.`);
   }
 
-  function updateQty(index, qty) {
-    setCart((current) => {
-      if (!Number.isInteger(index) || index < 0 || index >= current.length || !Number.isInteger(qty)) {
-        return current;
+  function addManyToCart(entries) {
+    let next = cartRef.current.slice();
+    const added = [];
+    const errors = [];
+    entries.forEach(({ product, ...options }) => {
+      try {
+        next = addProductToCart(next, product, options);
+        added.push(product.name);
+      } catch (error) {
+        errors.push(error.message || "A piece could not be added.");
       }
-      const next = current.slice();
-      if (qty < 1) next.splice(index, 1);
-      else {
-        const maxQty = Math.min(
-          MAX_CART_QUANTITY,
-          Number.isFinite(current[index].stock) ? current[index].stock : MAX_CART_QUANTITY
-        );
-        if (maxQty < 1) next.splice(index, 1);
-        else next[index] = { ...next[index], qty: Math.min(maxQty, qty) };
-      }
-      return next;
     });
+
+    if (added.length > 0) {
+      commitCart(next);
+      setDrawer(true);
+    }
+    if (errors.length > 0) {
+      notify(`${added.length ? `${added.length} pieces added. ` : ""}${errors.join(" ")}`);
+    } else if (added.length === 1) {
+      notify(`${added[0]} added to the bag.`);
+    } else if (added.length > 1) {
+      notify(`${added.length} pieces added to the bag.`);
+    }
+  }
+
+  function updateQty(index, qty) {
+    const current = cartRef.current;
+    if (!Number.isInteger(index) || index < 0 || index >= current.length || !Number.isInteger(qty)) return;
+    const next = current.slice();
+    if (qty < 1) next.splice(index, 1);
+    else {
+      const maxQty = Math.min(
+        MAX_CART_QUANTITY,
+        Number.isFinite(current[index].stock) ? current[index].stock : MAX_CART_QUANTITY
+      );
+      if (maxQty < 1) next.splice(index, 1);
+      else next[index] = { ...next[index], qty: Math.min(maxQty, qty) };
+    }
+    commitCart(next);
   }
 
   function removeFromCart(index) {
-    setCart((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    commitCart(cartRef.current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   function clearCart() {
-    setCart([]);
+    commitCart([]);
   }
 
   function updateCartPrices(products) {
     const pricesById = new Map(products.map((product) => [product.id, product.price]));
-    setCart((current) =>
-      current.map((item) =>
+    commitCart(
+      cartRef.current.map((item) =>
         pricesById.has(item.productId) ? { ...item, price: pricesById.get(item.productId) } : item
       )
     );
@@ -237,6 +271,7 @@ export function ShopProvider({ children }) {
       toast,
       notify,
       addToCart,
+      addManyToCart,
       updateQty,
       removeFromCart,
       clearCart,
