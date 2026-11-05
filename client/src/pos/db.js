@@ -26,12 +26,19 @@ function finish(tx) {
 
 export function openDb() {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  const pending = new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is not available."));
       return;
     }
+    let settled = false;
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const rejectOpen = (error) => {
+      if (settled) return;
+      settled = true;
+      if (dbPromise === pending) dbPromise = null;
+      reject(error);
+    };
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("catalog")) {
@@ -47,27 +54,49 @@ export function openDb() {
     };
     request.onsuccess = () => {
       const db = request.result;
+      if (settled) {
+        db.close();
+        return;
+      }
+      settled = true;
       db.onversionchange = () => {
         db.close();
-        dbPromise = null;
+        if (dbPromise === pending) dbPromise = null;
       };
       resolve(db);
     };
-    request.onerror = () => reject(request.error);
+    request.onblocked = () => rejectOpen(new Error("IndexedDB upgrade is blocked by another open tab. Close other StyleARZ tabs and try again."));
+    request.onerror = () => rejectOpen(request.error || new Error("Could not open IndexedDB."));
   });
-  dbPromise.catch(() => {
-    dbPromise = null;
+  dbPromise = pending;
+  pending.catch(() => {
+    if (dbPromise === pending) dbPromise = null;
   });
-  return dbPromise;
+  return pending;
 }
 
 async function run(storeNames, mode, work) {
   const db = await openDb();
   const tx = db.transaction(storeNames, mode);
   const done = finish(tx);
-  const result = await work(tx);
-  await done;
-  return result;
+  done.catch(() => {});
+  try {
+    const result = await work(tx);
+    await done;
+    return result;
+  } catch (error) {
+    try {
+      tx.abort();
+    } catch {
+      // The transaction may already have completed or aborted.
+    }
+    try {
+      await done;
+    } catch {
+      // Preserve the original operation error.
+    }
+    throw error;
+  }
 }
 
 function stripIndexField(item) {
@@ -84,16 +113,35 @@ export async function getCatalogByBarcode(code) {
 }
 
 export async function putCatalogItems(items = []) {
-  const list = items.filter((item) => item?.id);
-  if (!list.length) return;
+  if (!Array.isArray(items)) throw new Error("Catalog items must be a list.");
+  if (items.some((item) =>
+    !item ||
+    typeof item.id !== "string" ||
+    !item.id.trim() ||
+    typeof item.barcode !== "string" ||
+    !normalizeBarcode(item.barcode) ||
+    typeof item.name !== "string" ||
+    !item.name.trim() ||
+    !Number.isFinite(item.price) ||
+    item.price < 0 ||
+    !Number.isInteger(item.stock) ||
+    item.stock < 0
+  )) {
+    throw new Error("Catalog items must have a valid ID, barcode, name, price, and stock.");
+  }
+  if (!items.length) return;
   await run("catalog", "readwrite", (tx) => {
     const store = tx.objectStore("catalog");
-    list.forEach((item) => store.put({ ...item, _barcode: normalizeBarcode(item.barcode) }));
+    items.forEach((item) => store.put({ ...item, _barcode: normalizeBarcode(item.barcode) }));
   });
 }
 
 export async function removeCatalogIds(ids = []) {
-  const list = ids.filter(Boolean);
+  if (!Array.isArray(ids)) throw new Error("Catalog IDs must be a list.");
+  if (ids.some((id) => typeof id !== "string" || !id.length)) {
+    throw new Error("Catalog IDs must be non-empty strings.");
+  }
+  const list = ids;
   if (!list.length) return;
   await run("catalog", "readwrite", (tx) => {
     const store = tx.objectStore("catalog");
@@ -129,6 +177,19 @@ export async function removeOutbox(clientId) {
 }
 
 export async function saveCart(cart) {
+  if (!Array.isArray(cart) || cart.some((line) =>
+    !line ||
+    typeof line.itemId !== "string" ||
+    !line.itemId ||
+    typeof line.name !== "string" ||
+    !line.name ||
+    !Number.isFinite(line.price) ||
+    line.price < 0 ||
+    !Number.isInteger(line.qty) ||
+    line.qty < 1
+  )) {
+    throw new Error("The POS cart contains invalid items and could not be saved.");
+  }
   await run("cart", "readwrite", (tx) => {
     const store = tx.objectStore("cart");
     if (cart?.length) store.put(cart, CART_KEY);
@@ -138,5 +199,19 @@ export async function saveCart(cart) {
 
 export async function loadCart() {
   const cart = await run("cart", "readonly", (tx) => wrap(tx.objectStore("cart").get(CART_KEY)));
-  return Array.isArray(cart) ? cart : [];
+  if (cart === undefined) return [];
+  if (!Array.isArray(cart) || cart.some((line) =>
+    !line ||
+    typeof line.itemId !== "string" ||
+    !line.itemId ||
+    typeof line.name !== "string" ||
+    !line.name ||
+    !Number.isFinite(line.price) ||
+    line.price < 0 ||
+    !Number.isInteger(line.qty) ||
+    line.qty < 1
+  )) {
+    throw new Error("Saved POS cart data is invalid. The saved cart was left untouched.");
+  }
+  return cart;
 }

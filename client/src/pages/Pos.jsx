@@ -415,6 +415,8 @@ export default function Pos() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [cartLoaded, setCartLoaded] = useState(false);
+  const [cartLoadFailed, setCartLoadFailed] = useState(false);
+  const [cartStorageError, setCartStorageError] = useState("");
   const [outbox, setOutbox] = useState({ pending: 0, conflicts: 0, total: 0 });
   const [webrtcStatus, setWebrtcStatus] = useState("idle");
   const [offerPayload, setOfferPayload] = useState("");
@@ -472,9 +474,15 @@ export default function Pos() {
     let cancelled = false;
     loadCart()
       .then((saved) => {
-        if (!cancelled) setCart((current) => current.length ? current : saved);
+        if (cancelled) return;
+        setCart((current) => current.length ? current : saved);
+        setCartStorageError("");
       })
-      .catch(() => {})
+      .catch((loadError) => {
+        if (cancelled) return;
+        setCartLoadFailed(true);
+        setCartStorageError(loadError?.message || "Could not restore the saved POS cart.");
+      })
       .finally(() => {
         if (!cancelled) setCartLoaded(true);
       });
@@ -484,8 +492,13 @@ export default function Pos() {
   }, []);
 
   useEffect(() => {
-    if (cartLoaded) saveCart(cart).catch(() => {});
-  }, [cart, cartLoaded]);
+    if (!cartLoaded || cartLoadFailed) return;
+    saveCart(cart)
+      .then(() => setCartStorageError(""))
+      .catch((saveError) => {
+        setCartStorageError(saveError?.message || "Could not save the POS cart on this device.");
+      });
+  }, [cart, cartLoaded, cartLoadFailed]);
 
   const createSession = useCallback(async (nextMode) => {
     if (creatingRef.current || !navigator.onLine) return;
@@ -826,10 +839,11 @@ export default function Pos() {
         </div>
       </header>
 
-      {(error || notice) && (
+      {(error || notice || cartStorageError) && (
         <div className="pos-messages">
           {error && <p className="error">{error}</p>}
           {notice && <p className="notice">{notice}</p>}
+          {cartStorageError && <p className="error">Cart storage: {cartStorageError}</p>}
           {!session && online && <button className="text-link" type="button" onClick={() => createSession(mode)}>Retry session</button>}
         </div>
       )}
