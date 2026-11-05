@@ -7,10 +7,24 @@ const SHELL_CACHE = "sa-shell-v3";
 const ASSET_CACHE = "sa-assets-v3";
 
 function stamp() {
+  const now = new Date();
   return {
-    at: new Date().toISOString(),
-    day: new Date().toISOString().slice(0, 10),
+    at: now.toISOString(),
+    day: [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-"),
   };
+}
+
+function localDay() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 export function readOfflinePrepared() {
@@ -25,7 +39,7 @@ export function readOfflinePrepared() {
 
 export function isPreparedToday() {
   const saved = readOfflinePrepared();
-  return Boolean(saved && saved.day === new Date().toISOString().slice(0, 10));
+  return Boolean(saved && saved.day === localDay());
 }
 
 async function ensureServiceWorker() {
@@ -117,13 +131,18 @@ export async function prepareOfflinePos() {
   try {
     await syncCatalog();
   } catch (error) {
-    // Shell cache still helps Dual WebRTC; catalog sync is best-effort.
-    if (!error?.status) {
-      throw new Error("App shell saved, but the product catalog did not download. Try again on Wi‑Fi.");
-    }
+    throw new Error(
+      `App shell saved, but the product catalog did not download${error?.message ? `: ${error.message}` : ". Try again on Wi‑Fi."}`
+    );
   }
 
   const prepared = stamp();
-  localStorage.setItem(PREPARED_KEY, JSON.stringify(prepared));
+  try {
+    localStorage.setItem(PREPARED_KEY, JSON.stringify(prepared));
+  } catch {
+    throw new Error(
+      "Offline files and catalog are ready, but this browser could not save the preparation status. Check browser storage settings and try again."
+    );
+  }
   return prepared;
 }
