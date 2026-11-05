@@ -51,12 +51,36 @@ export async function startPairingQrScanner({ video, onPayload, onError }) {
   let timer = 0;
   let controls = null;
   let stream = null;
+  let reader = null;
+  let errorReported = false;
+
+  const stopReader = () => {
+    const candidates = [controls, reader];
+    for (const candidate of candidates) {
+      try {
+        candidate?.stop?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        candidate?.stopContinuousDecode?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        candidate?.reset?.();
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
   const cleanup = () => {
     stopped = true;
     window.clearTimeout(timer);
+    stopReader();
     try {
-      controls?.stop?.();
+      video?.pause?.();
     } catch {
       /* ignore */
     }
@@ -79,11 +103,16 @@ export async function startPairingQrScanner({ video, onPayload, onError }) {
 
   const detector = await createQrDetector();
   if (detector) {
-    stream = await navigator.mediaDevices.getUserMedia(videoConstraints());
-    video.srcObject = stream;
-    video.setAttribute("playsinline", "true");
-    video.muted = true;
-    await video.play();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(videoConstraints());
+      video.srcObject = stream;
+      video.setAttribute("playsinline", "true");
+      video.muted = true;
+      await video.play();
+    } catch (error) {
+      cleanup();
+      throw new Error("Could not start the camera for QR pairing.");
+    }
 
     const inspect = async () => {
       if (stopped) return;
@@ -97,7 +126,10 @@ export async function startPairingQrScanner({ video, onPayload, onError }) {
           }
         }
       } catch (error) {
-        onError?.(error);
+        if (!stopped && !errorReported) {
+          errorReported = true;
+          onError?.(error);
+        }
       }
       if (!stopped) timer = window.setTimeout(inspect, 220);
     };
@@ -105,21 +137,32 @@ export async function startPairingQrScanner({ video, onPayload, onError }) {
     return { stop: cleanup, hint: PAIR_HINT };
   }
 
-  const { BrowserMultiFormatReader } = await import("@zxing/browser");
-  const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
-  const hints = new Map();
-  hints.set(DecodeHintType.TRY_HARDER, true);
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-  const reader = new BrowserMultiFormatReader(hints, {
-    delayBetweenScanAttempts: 200,
-    delayBetweenScanSuccess: 1200,
-  });
+  try {
+    const { BrowserMultiFormatReader } = await import("@zxing/browser");
+    const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
+    const hints = new Map();
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+    reader = new BrowserMultiFormatReader(hints, {
+      delayBetweenScanAttempts: 200,
+      delayBetweenScanSuccess: 1200,
+    });
 
-  controls = await reader.decodeFromConstraints(videoConstraints(), video, (result, error) => {
-    if (result) finish(result.getText());
-    else if (error && error.name !== "NotFoundException") onError?.(error);
-  });
-  stream = video.srcObject;
+    controls = await reader.decodeFromConstraints(videoConstraints(), video, (result, error) => {
+      if (result) {
+        finish(result.getText());
+        return;
+      }
+      if (error && error.name !== "NotFoundException" && !stopped && !errorReported) {
+        errorReported = true;
+        onError?.(error);
+      }
+    });
+    stream = video.srcObject;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 
   return { stop: cleanup, hint: PAIR_HINT };
 }
