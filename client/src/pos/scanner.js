@@ -198,28 +198,39 @@ export async function captureBarcodeFromVideo(video) {
   return value;
 }
 
-async function nativeScanner(video, gate) {
-  const detector = await createNativeDetector();
-  if (!detector) throw new Error("Native barcode detector unavailable.");
-
+async function nativeScanner(video, gate, detector, onError) {
   const stream = await navigator.mediaDevices.getUserMedia(videoConstraints());
-  video.srcObject = stream;
-  video.setAttribute("playsinline", "true");
-  video.muted = true;
-  await video.play();
-
   let stopped = false;
   let timer;
+  let detectionErrorReported = false;
+  try {
+    video.srcObject = stream;
+    video.setAttribute("playsinline", "true");
+    video.muted = true;
+    await video.play();
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop());
+    if (video.srcObject === stream) video.srcObject = null;
+    throw error;
+  }
+
   const inspect = async () => {
     if (stopped) return;
     try {
       if (video.readyState >= 2) {
         const results = await detector.detect(video);
+        if (stopped) return;
+        detectionErrorReported = false;
         if (results[0]?.rawValue) gate.seen(results[0].rawValue);
         else gate.miss();
       }
-    } catch {
+    } catch (error) {
+      if (stopped) return;
       gate.miss();
+      if (!detectionErrorReported) {
+        detectionErrorReported = true;
+        onError?.(error);
+      }
     }
     if (!stopped) timer = window.setTimeout(inspect, 280);
   };
@@ -227,13 +238,16 @@ async function nativeScanner(video, gate) {
 
   return {
     stop: () => {
+      if (stopped) return;
       stopped = true;
       window.clearTimeout(timer);
       stream.getTracks().forEach((track) => track.stop());
-      video.srcObject = null;
+      if (video.srcObject === stream) video.srcObject = null;
     },
     capture: async () => {
+      if (stopped) throw new Error("Camera scanner is stopped.");
       const value = await captureBarcodeFromVideo(video);
+      if (stopped) throw new Error("Camera scanner is stopped.");
       gate.lock(value);
       return value;
     },
@@ -246,7 +260,9 @@ async function zxingScanner(video, gate, onError) {
     delayBetweenScanAttempts: 220,
     delayBetweenScanSuccess: 1800,
   });
+  let stopped = false;
   const controls = await reader.decodeFromConstraints(videoConstraints(), video, (result, error) => {
+    if (stopped) return;
     if (result) gate.seen(result.getText());
     else if (isBenignScanError(error)) gate.miss();
     // Normal while aiming — never show "No MultiFormat Readers were able to detect the code".
@@ -255,6 +271,8 @@ async function zxingScanner(video, gate, onError) {
 
   return {
     stop: () => {
+      if (stopped) return;
+      stopped = true;
       try {
         controls.stop();
       } catch {
@@ -264,7 +282,9 @@ async function zxingScanner(video, gate, onError) {
       video.srcObject = null;
     },
     capture: async () => {
+      if (stopped) throw new Error("Camera scanner is stopped.");
       const value = await captureBarcodeFromVideo(video);
+      if (stopped) throw new Error("Camera scanner is stopped.");
       gate.lock(value);
       return value;
     },
@@ -281,7 +301,7 @@ export async function startCameraScanner({ video, onDetected, onError }) {
 
   try {
     const detector = await createNativeDetector();
-    if (detector) return await nativeScanner(video, gate);
+    if (detector) return await nativeScanner(video, gate, detector, onError);
   } catch {
     /* fall through */
   }
