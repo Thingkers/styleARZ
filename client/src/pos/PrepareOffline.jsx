@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { isPreparedToday, prepareOfflinePos, readOfflinePrepared } from "./offlinePrep";
+import { prepareOfflinePos, readOfflinePrepared } from "./offlinePrep";
 
 function formatWhen(iso) {
   if (!iso) return "";
@@ -11,14 +11,38 @@ function formatWhen(iso) {
   }
 }
 
+function localDay() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 export default function PrepareOffline({ role = "counter", auto = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [prepared, setPrepared] = useState(() => readOfflinePrepared());
-  const [readyToday, setReadyToday] = useState(() => isPreparedToday());
-  const [open, setOpen] = useState(() => !isPreparedToday());
+  const [today, setToday] = useState(localDay);
+  const [open, setOpen] = useState(() => {
+    const saved = readOfflinePrepared();
+    return !saved || saved.day !== localDay();
+  });
   const qrRef = useRef(null);
+  const prepareInFlightRef = useRef(false);
+  const readyToday = prepared?.day === today;
   const phonePrepareUrl = `${window.location.origin}/pos/scan?prepare=1`;
+
+  useEffect(() => {
+    const refreshDay = () => setToday(localDay());
+    const timer = window.setInterval(refreshDay, 60_000);
+    window.addEventListener("focus", refreshDay);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshDay);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || role !== "counter" || !qrRef.current) return undefined;
@@ -35,29 +59,33 @@ export default function PrepareOffline({ role = "counter", auto = false }) {
     };
   }, [open, role, phonePrepareUrl]);
 
-  async function runPrepare() {
+  const runPrepare = useCallback(async () => {
+    if (prepareInFlightRef.current) return;
+    prepareInFlightRef.current = true;
     setBusy(true);
     setError("");
     try {
       const next = await prepareOfflinePos();
       setPrepared(next);
-      setReadyToday(true);
       setOpen(false);
     } catch (err) {
       setError(err.message || "Could not prepare offline POS.");
-      setReadyToday(false);
       setOpen(true);
     } finally {
+      prepareInFlightRef.current = false;
       setBusy(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    if (!auto || !navigator.onLine || readyToday) return undefined;
-    runPrepare();
-    // One auto-run when opened with ?prepare=1
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto]);
+    if (!auto || readyToday) return undefined;
+    const prepareWhenOnline = () => {
+      if (navigator.onLine) runPrepare();
+    };
+    prepareWhenOnline();
+    window.addEventListener("online", prepareWhenOnline);
+    return () => window.removeEventListener("online", prepareWhenOnline);
+  }, [auto, readyToday, runPrepare]);
 
   if (readyToday && !open) {
     return (
