@@ -88,7 +88,7 @@ async function cacheShellInPage() {
 
 async function askServiceWorkerToPrepare(registration) {
   const worker = registration.active || registration.waiting || registration.installing;
-  if (!worker || !navigator.serviceWorker.controller) return null;
+  if (!worker) return false;
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     let settled = false;
@@ -123,7 +123,7 @@ export async function prepareOfflinePos() {
   const registration = await ensureServiceWorker();
   await cacheShellInPage();
   const serviceWorkerPrepared = await askServiceWorkerToPrepare(registration);
-  if (serviceWorkerPrepared === false) {
+  if (serviceWorkerPrepared !== true) {
     throw new Error("The service worker could not finish offline preparation. Try again while online.");
   }
 
