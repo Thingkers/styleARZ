@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { Loading } from "./components/ui";
@@ -19,7 +19,10 @@ function RequireAuth({ children }) {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <Loading />;
-  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
   return children;
 }
 
@@ -27,21 +30,15 @@ function RequireAdmin({ children }) {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <Loading />;
-  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
   if (user.role !== "admin") return <Navigate to="/" replace />;
   return children;
 }
 
 export default function App() {
-  const { ready } = useAuth();
-  if (!ready) {
-    return (
-      <div className="boot">
-        <Loading label="Opening StyleARZ" />
-      </div>
-    );
-  }
-
   return (
     <Layout>
       <Routes>
@@ -121,7 +118,16 @@ export default function App() {
             </RequireAdmin>
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="*"
+          element={
+            <main className="page wrap">
+              <h1>Page not found</h1>
+              <p className="lede">That page may have moved or the address may be incorrect.</p>
+              <Link className="btn solid" to="/">Back to home</Link>
+            </main>
+          }
+        />
       </Routes>
     </Layout>
   );
