@@ -17,6 +17,7 @@
     "@zxing/library": "^0.21.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "fflate": "^0.8.2",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
