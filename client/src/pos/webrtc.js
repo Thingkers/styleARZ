@@ -1,3 +1,5 @@
+import { deflateSync, inflateSync } from "fflate";
+
 // Prefer LAN host candidates for shop Wi‑Fi. Optional STUN only when the browser reports online
 // (helps some networks; ignored when the WAN is down).
 function iceConfig() {
@@ -22,34 +24,21 @@ function fromUrlSafeB64(text) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-async function compressJson(json) {
-  if (typeof CompressionStream === "undefined") return null;
-  try {
-    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-    const buffer = await new Response(stream).arrayBuffer();
-    return new Uint8Array(buffer);
-  } catch {
-    return null;
+function parsePayload(json) {
+  const parsed = JSON.parse(json);
+  if (!parsed.sdp || !["offer", "answer"].includes(parsed.type)) {
+    throw new Error("Invalid pairing payload.");
   }
-}
-
-async function decompressJson(bytes) {
-  if (typeof DecompressionStream === "undefined") return null;
-  try {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    return await new Response(stream).text();
-  } catch {
-    return null;
-  }
+  return parsed;
 }
 
 export async function encodePayload(desc) {
   const json = JSON.stringify({ type: desc.type, sdp: desc.sdp });
-  const compressed = await compressJson(json);
-  if (compressed?.length && compressed.length < json.length) {
+  const bytes = new TextEncoder().encode(json);
+  const compressed = deflateSync(bytes);
+  if (compressed.length && compressed.length < bytes.length) {
     return `z.${toUrlSafeB64(compressed)}`;
   }
-  const bytes = new TextEncoder().encode(json);
   return toUrlSafeB64(bytes);
 }
 
@@ -57,24 +46,17 @@ export async function decodePayload(raw) {
   const text = String(raw || "").trim();
   if (!text) throw new Error("Scan or paste the pairing code from the other device.");
   if (text.startsWith("{")) {
-    const parsed = JSON.parse(text);
-    if (!parsed.sdp || !parsed.type) throw new Error("Invalid pairing payload.");
-    return parsed;
+    return parsePayload(text);
   }
 
-  let json;
+  let bytes;
   if (text.startsWith("z.")) {
-    const bytes = fromUrlSafeB64(text.slice(2));
-    json = await decompressJson(bytes);
-    if (!json) throw new Error("Could not read compressed pairing code on this browser.");
+    bytes = inflateSync(fromUrlSafeB64(text.slice(2)));
   } else {
-    const bytes = fromUrlSafeB64(text);
-    json = new TextDecoder().decode(bytes);
+    bytes = fromUrlSafeB64(text);
   }
 
-  const parsed = JSON.parse(json);
-  if (!parsed.sdp || !parsed.type) throw new Error("Invalid pairing payload.");
-  return parsed;
+  return parsePayload(new TextDecoder().decode(bytes));
 }
 
 function sdpHasCandidate(sdp) {
@@ -125,24 +107,16 @@ function waitForIce(pc, { maxMs = 8000 } = {}) {
   });
 }
 
-/** Brief getUserMedia / dummy PC so Chrome is more likely to expose real LAN IPs (not only .local). */
-async function warmLocalNetwork() {
+function closePeer(pc, channel) {
   try {
-    if (navigator.mediaDevices?.getUserMedia) {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: "user" } });
-      stream.getTracks().forEach((track) => track.stop());
-    }
+    channel?.close();
   } catch {
-    /* camera optional for warming */
+    /* already closed */
   }
   try {
-    const warm = new RTCPeerConnection({ iceServers: [] });
-    warm.createDataChannel("warm");
-    await warm.setLocalDescription(await warm.createOffer());
-    await waitForIce(warm, { maxMs: 2500 }).catch(() => {});
-    warm.close();
+    pc?.close();
   } catch {
-    /* ignore */
+    /* already closed */
   }
 }
 
@@ -201,7 +175,6 @@ function wireChannel(channel, { onBarcode, onStatus }) {
 /** Counter (host): creates offer; phone scans/answers. */
 export async function createHostPeer({ onBarcode, onStatus }) {
   onStatus?.("warming");
-  await warmLocalNetwork();
   const pc = new RTCPeerConnection(iceConfig());
   const channel = pc.createDataChannel("stylearz-scan", { ordered: true });
   wireChannel(channel, { onBarcode, onStatus });
@@ -214,41 +187,44 @@ export async function createHostPeer({ onBarcode, onStatus }) {
     if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") onStatus?.("connected");
   };
 
-  onStatus?.("gathering");
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await waitForIce(pc);
-  const local = pc.localDescription;
-  if (!sdpHasCandidate(local?.sdp)) {
-    pc.close();
-    throw new Error("No local network address found. Join the shop Wi‑Fi on this computer, then try again.");
-  }
+  try {
+    onStatus?.("gathering");
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitForIce(pc);
+    const local = pc.localDescription;
+    if (!sdpHasCandidate(local?.sdp)) {
+      throw new Error("No local network address found. Join the shop Wi‑Fi on this computer, then try again.");
+    }
 
-  return {
-    peerConnection: pc,
-    dataChannel: channel,
-    offerPayload: await encodePayload(local),
-    async acceptAnswer(raw) {
-      const answer = await decodePayload(raw);
-      onStatus?.("connecting");
-      await pc.setRemoteDescription(answer);
-      await waitForPeerConnected(pc);
-      onStatus?.("connected");
-    },
-    close() {
-      try {
-        channel.close();
-      } catch {
-        /* ignore */
-      }
-      pc.close();
-    },
-  };
+    return {
+      peerConnection: pc,
+      dataChannel: channel,
+      offerPayload: await encodePayload(local),
+      async acceptAnswer(raw) {
+        const answer = await decodePayload(raw);
+        onStatus?.("connecting");
+        try {
+          await pc.setRemoteDescription(answer);
+          await waitForPeerConnected(pc);
+          onStatus?.("connected");
+        } catch (error) {
+          closePeer(pc, channel);
+          throw error;
+        }
+      },
+      close() {
+        closePeer(pc, channel);
+      },
+    };
+  } catch (error) {
+    closePeer(pc, channel);
+    throw error;
+  }
 }
 
 /** Phone (scanner): takes host offer; returns answer for counter to scan. */
 export async function createScannerPeer({ onStatus }) {
-  await warmLocalNetwork();
   const pc = new RTCPeerConnection(iceConfig());
   let channel = null;
 
@@ -279,16 +255,21 @@ export async function createScannerPeer({ onStatus }) {
   return {
     peerConnection: pc,
     async answerFromOffer(raw) {
-      const offer = await decodePayload(raw);
-      onStatus?.("answering");
-      await pc.setRemoteDescription(offer);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await waitForIce(pc);
-      if (!sdpHasCandidate(pc.localDescription?.sdp)) {
-        throw new Error("No local network address on this phone. Join the same shop Wi‑Fi, then scan the offer again.");
+      try {
+        const offer = await decodePayload(raw);
+        onStatus?.("answering");
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitForIce(pc);
+        if (!sdpHasCandidate(pc.localDescription?.sdp)) {
+          throw new Error("No local network address on this phone. Join the same shop Wi‑Fi, then scan the offer again.");
+        }
+        return encodePayload(pc.localDescription);
+      } catch (error) {
+        closePeer(pc, channel);
+        throw error;
       }
-      return encodePayload(pc.localDescription);
     },
     sendBarcode(barcode) {
       if (!channel || channel.readyState !== "open") {
@@ -300,12 +281,7 @@ export async function createScannerPeer({ onStatus }) {
       return channel?.readyState === "open";
     },
     close() {
-      try {
-        channel?.close();
-      } catch {
-        /* ignore */
-      }
-      pc.close();
+      closePeer(pc, channel);
     },
   };
 }
