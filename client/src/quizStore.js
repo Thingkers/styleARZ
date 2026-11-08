@@ -14,7 +14,8 @@ export function readStoredQuiz() {
       return null;
     }
     return parsed;
-  } catch {
+  } catch (error) {
+    console.warn("Could not read saved quiz from localStorage.", error);
     localStorage.removeItem(QUIZ_STORAGE_KEY);
     return null;
   }
