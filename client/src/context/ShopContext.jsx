@@ -9,9 +9,12 @@ const MAX_CART_QUANTITY = 5;
 
 function readStoredList(key) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    const raw = localStorage.getItem(key);
+    if (raw == null || raw === "") return [];
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (error) {
+    console.warn(`Could not read ${key} from localStorage.`, error);
     return [];
   }
 }
