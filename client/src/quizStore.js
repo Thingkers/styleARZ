@@ -10,13 +10,12 @@ export function readStoredQuiz() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!isQuizPayload(parsed)) {
-      localStorage.removeItem(QUIZ_STORAGE_KEY);
+      console.warn("Saved quiz data has an unexpected format; leaving it untouched.");
       return null;
     }
     return parsed;
   } catch (error) {
     console.warn("Could not read saved quiz from localStorage.", error);
-    localStorage.removeItem(QUIZ_STORAGE_KEY);
     return null;
   }
 }
