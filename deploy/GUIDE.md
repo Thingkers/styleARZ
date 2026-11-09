@@ -150,7 +150,7 @@ Exit with `exit` when connected.
 | Name | Value |
 |------|--------|
 | `NODE_ENV` | `production` |
-| `JWT_SECRET` | long random string (same as in your private `credentials.json`) |
+| `JWT_SECRET` | random string of at least 32 characters (same as in your private `credentials.json`) |
 | `PORT` | usually set automatically by the selector |
 
 4. Important CloudLinux rule: the app root must **not** contain a real `node_modules` folder. The selector creates a **symlink** named `node_modules` into a virtual env. Use **Run NPM Install** in the cPanel UI — do **not** run `npm install` in the app root over SSH after the app exists.
