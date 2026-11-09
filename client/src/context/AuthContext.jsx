@@ -37,7 +37,9 @@ export function AuthProvider({ children }) {
     if (!data?.token || typeof data.token !== "string") {
       throw new Error("Authentication failed. Please try again.");
     }
-    writeAuthToken(data.token);
+    if (!writeAuthToken(data.token)) {
+      throw new Error("Could not save your session. Check browser storage settings and try again.");
+    }
     setUser(data.user || null);
     return data.user;
   }
@@ -47,7 +49,9 @@ export function AuthProvider({ children }) {
     if (!data?.token || typeof data.token !== "string") {
       throw new Error("Account created, but a session token was not returned.");
     }
-    writeAuthToken(data.token);
+    if (!writeAuthToken(data.token)) {
+      throw new Error("Your account was created, but the session could not be saved. Check browser storage settings and sign in again.");
+    }
     setUser(data.user || null);
     return data.user;
   }

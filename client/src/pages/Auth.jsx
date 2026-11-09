@@ -153,7 +153,6 @@ export function Forgot() {
   useDocumentTitle("Forgot password");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
-  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -162,11 +161,9 @@ export function Forgot() {
     setBusy(true);
     setError("");
     setMessage("");
-    setCode("");
     try {
       const data = await api("/api/auth/forgot", { method: "POST", body: { email } });
       setMessage(data.message);
-      if (data.resetCode) setCode(data.resetCode);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -176,16 +173,10 @@ export function Forgot() {
 
   return (
     <div className="page wrap narrow">
-      <PageHeader kicker="Account" title="Reset password" lede="We will issue a short code. Email delivery is not connected in this build." />
+      <PageHeader kicker="Account" title="Reset password" lede="Use the reset code from the server console in local development. Email delivery is configured separately in production." />
       <form className="panel stack" onSubmit={onSubmit}>
         {error && <p className="error">{error}</p>}
         {message && <p className="notice">{message}</p>}
-        {code && (
-          <p className="notice">
-            Reset code: <strong>{code}</strong>. Use it on the{" "}
-            <Link to={`/reset?email=${encodeURIComponent(email)}`}>reset form</Link>.
-          </p>
-        )}
         <label>
           Email
           <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -194,6 +185,8 @@ export function Forgot() {
           {busy ? "Requesting" : "Request reset code"}
         </button>
         <p className="muted">
+          Already have a code? <Link to={`/reset?email=${encodeURIComponent(email) || ""}`}>Continue to reset</Link>
+          {" · "}
           <Link to="/login">Back to sign in</Link>
         </p>
       </form>

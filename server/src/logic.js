@@ -1,3 +1,4 @@
+const { freeShippingFrom, shippingFee } = require("../../shared/commerce.json");
 const SIZES = ["XS", "S", "M", "L", "XL"];
 
 function suggestSize({ height, fit }) {
@@ -148,7 +149,7 @@ function priceItems(products, items) {
     });
   }
   const subtotal = priced.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const shipping = subtotal >= 8000 ? 0 : 120;
+  const shipping = subtotal >= freeShippingFrom ? 0 : shippingFee;
   return { items: priced, subtotal, shipping, total: subtotal + shipping };
 }
 

@@ -36,6 +36,26 @@ const pos = require("./pos");
 const barcode = require("./barcode");
 const db = store.load();
 const app = express();
+const authRateLimit = new Map();
+
+function enforceAuthRateLimit(req, res, next, limit = 5, windowMs = 10 * 60 * 1000) {
+  const key = `${req.ip || "unknown"}:${req.path}`;
+  const now = Date.now();
+  const current = authRateLimit.get(key) || { count: 0, resetAt: now + windowMs };
+
+  if (current.resetAt <= now) {
+    current.count = 0;
+    current.resetAt = now + windowMs;
+  }
+
+  if (current.count >= limit) {
+    return fail(res, 429, "Too many attempts. Please wait a few minutes and try again.");
+  }
+
+  current.count += 1;
+  authRateLimit.set(key, current);
+  return next();
+}
 
 const jsonBody = express.json({ limit: "1mb" });
 // Inventory image uploads carry base64 images and use their own larger parser after auth.
@@ -198,11 +218,13 @@ app.post("/api/auth/signup", (req, res) => {
 });
 
 app.post("/api/auth/login", (req, res) => {
-  const email = cleanEmail(req.body.email);
-  const password = String(req.body.password || "");
-  const user = db.users.find((entry) => entry.email === email);
-  if (!user || !verifyPassword(password, user)) return fail(res, 401, "Email or password is incorrect.");
-  res.json({ token: signToken(user), user: publicUser(user) });
+  return enforceAuthRateLimit(req, res, () => {
+    const email = cleanEmail(req.body.email);
+    const password = String(req.body.password || "");
+    const user = db.users.find((entry) => entry.email === email);
+    if (!user || !verifyPassword(password, user)) return fail(res, 401, "Email or password is incorrect.");
+    return res.json({ token: signToken(user), user: publicUser(user) });
+  });
 });
 
 app.get("/api/auth/me", (req, res) => {
@@ -261,61 +283,65 @@ app.patch("/api/auth/profile", requireUser, (req, res) => {
 });
 
 app.post("/api/auth/forgot", (req, res) => {
-  if (process.env.NODE_ENV === "production") {
-    return fail(res, 503, "Password reset is unavailable until email delivery is configured.");
-  }
-  const email = cleanEmail(req.body.email);
-  const user = db.users.find((entry) => entry.email === email);
-  if (!user) {
+  return enforceAuthRateLimit(req, res, () => {
+    if (process.env.NODE_ENV === "production") {
+      return fail(res, 503, "Password reset is unavailable until email delivery is configured.");
+    }
+    const email = cleanEmail(req.body.email);
+    const user = db.users.find((entry) => entry.email === email);
+    if (!user) {
+      return res.json({
+        ok: true,
+        message: "If that email is registered, a reset code is ready. Check the server console for local testing.",
+      });
+    }
+    user.resetCode = String(crypto.randomInt(100000, 1000000));
+    user.resetExpires = Date.now() + 30 * 60 * 1000;
+    user.resetAttempts = 0;
+    store.save();
+    console.info(`[StyleARZ reset] ${email} -> ${user.resetCode}`);
     return res.json({
       ok: true,
-      message: "If that email is registered, a reset code is ready.",
+      message: "If that email is registered, a reset code has been generated. Check the server console for local testing.",
     });
-  }
-  user.resetCode = String(crypto.randomInt(100000, 1000000));
-  user.resetExpires = Date.now() + 30 * 60 * 1000;
-  user.resetAttempts = 0;
-  store.save();
-  res.json({
-    ok: true,
-    resetCode: user.resetCode,
-    message: "Email delivery is not connected yet, so the reset code is shown here. It expires in 30 minutes.",
   });
 });
 
 app.post("/api/auth/reset", (req, res) => {
-  const email = cleanEmail(req.body.email);
-  const code = String(req.body.code || "").trim();
-  const password = String(req.body.password || "");
-  const user = db.users.find((entry) => entry.email === email);
-  if (
-    !user ||
-    !user.resetCode ||
-    !Number.isFinite(user.resetExpires) ||
-    user.resetExpires < Date.now() ||
-    (user.resetAttempts || 0) >= 5
-  ) {
-    return fail(res, 400, "The reset code is invalid or has expired.");
-  }
-  if (!/^\d{6}$/.test(code) || user.resetCode !== code) {
-    user.resetAttempts = (user.resetAttempts || 0) + 1;
-    if (user.resetAttempts >= 5) {
-      user.resetCode = null;
-      user.resetExpires = null;
-      user.resetAttempts = 0;
+  return enforceAuthRateLimit(req, res, () => {
+    const email = cleanEmail(req.body.email);
+    const code = String(req.body.code || "").trim();
+    const password = String(req.body.password || "");
+    const user = db.users.find((entry) => entry.email === email);
+    if (
+      !user ||
+      !user.resetCode ||
+      !Number.isFinite(user.resetExpires) ||
+      user.resetExpires < Date.now() ||
+      (user.resetAttempts || 0) >= 5
+    ) {
+      return fail(res, 400, "The reset code is invalid or has expired.");
     }
+    if (!/^\d{6}$/.test(code) || user.resetCode !== code) {
+      user.resetAttempts = (user.resetAttempts || 0) + 1;
+      if (user.resetAttempts >= 5) {
+        user.resetCode = null;
+        user.resetExpires = null;
+        user.resetAttempts = 0;
+      }
+      store.save();
+      return fail(res, 400, "The reset code is invalid or has expired.");
+    }
+    if (password.length < 6) return fail(res, 400, "Use at least 6 characters.");
+    const next = hashPassword(password);
+    user.salt = next.salt;
+    user.hash = next.hash;
+    user.resetCode = null;
+    user.resetExpires = null;
+    user.resetAttempts = 0;
     store.save();
-    return fail(res, 400, "The reset code is invalid or has expired.");
-  }
-  if (password.length < 6) return fail(res, 400, "Use at least 6 characters.");
-  const next = hashPassword(password);
-  user.salt = next.salt;
-  user.hash = next.hash;
-  user.resetCode = null;
-  user.resetExpires = null;
-  user.resetAttempts = 0;
-  store.save();
-  res.json({ ok: true, message: "Password updated. You can sign in." });
+    return res.json({ ok: true, message: "Password updated. You can sign in." });
+  });
 });
 
 app.get("/api/wishlist", requireUser, (req, res) => {
