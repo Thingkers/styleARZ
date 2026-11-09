@@ -12,10 +12,12 @@ function readStoredList(key) {
     const raw = localStorage.getItem(key);
     if (raw == null || raw === "") return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return parsed;
+    console.warn(`Saved ${key} data is not a list; leaving it untouched.`);
+    return null;
   } catch (error) {
     console.warn(`Could not read ${key} from localStorage.`, error);
-    return [];
+    return null;
   }
 }
 
@@ -38,7 +40,7 @@ function removeStoredList(key) {
 }
 
 function readCart() {
-  return readStoredList(CART_STORAGE_KEY).filter(
+  return (readStoredList(CART_STORAGE_KEY) || []).filter(
     (item) =>
       item &&
       typeof item.productId === "string" &&
@@ -64,22 +66,20 @@ function cleanProductIds(ids) {
 }
 
 function readGuestWishlist() {
-  try {
-    return cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
-  } catch {
-    return [];
-  }
+  return cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY) || []);
 }
 
 export function ShopProvider({ children }) {
   const { user, ready: authReady } = useAuth();
   const [cart, setCart] = useState(readCart);
   const cartRef = useRef(cart);
-  const [wishlist, setWishlist] = useState(() => cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY)));
+  const initialCartRef = useRef(cart);
+  const [wishlist, setWishlist] = useState(() => cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY) || []));
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
+    if (cart === initialCartRef.current) return;
     if (!writeStoredList(CART_STORAGE_KEY, cart)) {
       setToast("Your bag changed, but this browser could not save it.");
     }
@@ -96,7 +96,8 @@ export function ShopProvider({ children }) {
       };
     }
 
-    const guestWishlist = cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
+    const storedGuestWishlist = readStoredList(GUEST_WISHLIST_STORAGE_KEY);
+    const guestWishlist = cleanProductIds(storedGuestWishlist || []);
     const merged = cleanProductIds([...(user.wishlist || []), ...guestWishlist]);
     setWishlist(merged);
 
@@ -107,7 +108,7 @@ export function ShopProvider({ children }) {
         }
         if (!active) return;
         setWishlist(cleanProductIds(data.productIds));
-        if (!removeStoredList(GUEST_WISHLIST_STORAGE_KEY)) {
+        if (storedGuestWishlist && !removeStoredList(GUEST_WISHLIST_STORAGE_KEY)) {
           setToast("Wishlist synced, but guest wishlist data could not be cleared from this browser.");
         }
       })
