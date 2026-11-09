@@ -14,7 +14,10 @@ export const PALETTE = [
 ];
 
 function hexToHsl(hex) {
-  const raw = hex.replace("#", "");
+  if (typeof hex !== "string" || !/^#?[0-9a-f]{6}$/i.test(hex.trim())) {
+    throw new TypeError("Colour hex must be a 6-digit hex value, such as #c4a574.");
+  }
+  const raw = hex.trim().replace(/^#/, "");
   const r = parseInt(raw.slice(0, 2), 16) / 255;
   const g = parseInt(raw.slice(2, 4), 16) / 255;
   const b = parseInt(raw.slice(4, 6), 16) / 255;
@@ -43,9 +46,13 @@ function hexToHsl(hex) {
 }
 
 export function compareColours(a, b) {
+  if (!a || typeof a !== "object" || !b || typeof b !== "object") {
+    throw new TypeError("Both colours must be objects with a hex value.");
+  }
   const ha = hexToHsl(a.hex);
   const hb = hexToHsl(b.hex);
-  const neutral = (item) => item.s < 18 || item.l > 90 || item.l < 14;
+  const neutral = (item) =>
+    item.s < 22 || (item.l >= 90 && item.s < 45) || (item.l <= 12 && item.s < 45);
   if (neutral(ha) && neutral(hb)) {
     return {
       verdict: "Harmonious",
@@ -60,26 +67,37 @@ export function compareColours(a, b) {
   }
   let diff = Math.abs(ha.h - hb.h);
   if (diff > 180) diff = 360 - diff;
+  const lightnessGap = Math.abs(ha.l - hb.l);
+  const saturationGap = Math.abs(ha.s - hb.s);
+  const noticeableToneContrast = lightnessGap >= 30 || saturationGap >= 35;
   if (diff < 28) {
     return {
-      verdict: "Tonal",
-      note: "These colours sit close together. Use them in different textures so the look does not flatten.",
+      verdict: noticeableToneContrast ? "Tonal contrast" : "Tonal",
+      note: noticeableToneContrast
+        ? "These colours share a close hue but differ in brightness or intensity. Let the stronger tone lead and use the other as support."
+        : "These colours sit close together. Use them in different textures so the look does not flatten.",
     };
   }
   if (diff < 55) {
     return {
-      verdict: "Adjacent",
-      note: "A close pairing. It feels considered when the rest of the outfit stays quieter than these two.",
+      verdict: noticeableToneContrast ? "Adjacent contrast" : "Adjacent",
+      note: noticeableToneContrast
+        ? "These neighbouring hues differ in brightness or intensity. Keep the more vivid or lighter tone as the accent."
+        : "A close pairing. It feels considered when the rest of the outfit stays quieter than these two.",
     };
   }
   if (diff >= 150) {
     return {
       verdict: "Complementary",
-      note: "These oppose each other on the wheel. Let one lead and keep the second to a smaller piece.",
+      note: noticeableToneContrast
+        ? "These oppose each other on the wheel and differ in brightness or intensity. Let the stronger tone lead and keep the second to a smaller piece."
+        : "These oppose each other on the wheel. Let one lead and keep the second to a smaller piece.",
     };
   }
   return {
     verdict: "High contrast",
-    note: "The gap is wide enough to compete. Wear one as the accent and hold the rest of the look to ink, ivory, or stone.",
+    note: noticeableToneContrast
+      ? "The hue gap and difference in brightness or intensity can compete. Wear one as the accent and hold the rest of the look to ink, ivory, or stone."
+      : "The gap is wide enough to compete. Wear one as the accent and hold the rest of the look to ink, ivory, or stone.",
   };
 }
