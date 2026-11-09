@@ -78,9 +78,7 @@ export function Quiz() {
     setBusy(true);
     try {
       const data = await api("/api/quiz", { method: "POST", body: { answers } });
-      if (!writeStoredQuiz(data)) {
-        throw new Error("Your browser blocked saving your edit. Please try again.");
-      }
+      writeStoredQuiz(data);
       navigate("/quiz/results");
     } catch (err) {
       setError(err.message || "Could not prepare your edit.");
@@ -131,6 +129,7 @@ export function Quiz() {
 
 export function QuizResults() {
   useDocumentTitle("Your edit");
+  const [storageError, setStorageError] = useState("");
   const saved = readStoredQuiz();
   const result = saved?.result;
   const products = saved?.products || [];
@@ -150,11 +149,20 @@ export function QuizResults() {
         <Link
           className="btn line"
           to="/quiz"
-          onClick={() => clearStoredQuiz()}
+          onClick={(event) => {
+            try {
+              clearStoredQuiz();
+              setStorageError("");
+            } catch (error) {
+              event.preventDefault();
+              setStorageError(error.message || "Could not clear your saved edit.");
+            }
+          }}
         >
           Retake
         </Link>
       </PageHeader>
+      {storageError && <p className="error">{storageError}</p>}
       <ul className="answer-row">
         {Object.entries(result.answers || {}).map(([key, value]) => (
           <li key={key}>
