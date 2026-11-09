@@ -1,12 +1,12 @@
 const crypto = require("crypto");
 
-const SECRET = process.env.JWT_SECRET;
+const configuredSecret = (process.env.JWT_SECRET || "").trim();
 
-const signingSecret = SECRET || (process.env.NODE_ENV === "production" ? null : crypto.randomBytes(32).toString("hex"));
-
-if (!signingSecret) {
+if (process.env.NODE_ENV === "production" && configuredSecret.length < 32) {
   throw new Error("Set JWT_SECRET to a random value of at least 32 characters in production.");
 }
+
+const signingSecret = configuredSecret || crypto.randomBytes(32).toString("hex");
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
