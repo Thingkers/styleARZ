@@ -31,17 +31,20 @@ export default function Home() {
       setErrors((current) => ({ ...current, quiz: err.message }));
     }
 
-    function loadSection(section, path, onSuccess) {
+    function loadSection(section, path, onSuccess, normalize = (value) => value) {
       api(path)
-        .then(onSuccess)
+        .then((data) => onSuccess(normalize(data)))
         .catch((err) => setErrors((current) => ({ ...current, [section]: err.message })))
         .finally(() => setLoading((current) => ({ ...current, [section]: false })));
     }
 
-    loadSection("products", "/api/products?featured=1", (data) => setProducts(data.products));
-    loadSection("collections", "/api/home-collections", (data) => setCollections(data.collections || []));
-    loadSection("looks", "/api/looks", (data) => setLooks(data.looks));
-    loadSection("posts", "/api/community", (data) => setPosts(data.posts.slice(0, 3)));
+    loadSection("products", "/api/products?featured=1", (items) => setProducts(items), (data) => Array.isArray(data?.products) ? data.products : []);
+    loadSection("collections", "/api/home-collections", (items) => setCollections(items), (data) => Array.isArray(data?.collections) ? data.collections : []);
+    loadSection("looks", "/api/looks", (items) => setLooks(items), (data) => Array.isArray(data?.looks) ? data.looks : []);
+    loadSection("posts", "/api/community", (items) => setPosts(items), (data) => {
+      const posts = Array.isArray(data?.posts) ? data.posts : [];
+      return posts.slice(0, 3);
+    });
   }, []);
 
   return (
