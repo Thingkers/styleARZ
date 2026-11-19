@@ -83,6 +83,34 @@ export async function getCatalogByBarcode(code) {
   return stripIndexField(row) || null;
 }
 
+export async function listCatalogItems() {
+  const rows = await run("catalog", "readonly", (tx) => wrap(tx.objectStore("catalog").getAll()));
+  return rows.map(stripIndexField);
+}
+
+export async function searchCatalogItems(query, limit = 16) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+  const rows = await listCatalogItems();
+  const scored = [];
+  for (const item of rows) {
+    if (!item) continue;
+    const hay = [item.name, item.sku, item.barcode, item.color, item.size, item.category, item.notes]
+      .join(" ")
+      .toLowerCase();
+    if (!hay.includes(q)) continue;
+    const barcode = normalizeBarcode(item.barcode);
+    const exactBarcode = barcode && barcode === normalizeBarcode(q);
+    const nameStarts = String(item.name || "").toLowerCase().startsWith(q);
+    scored.push({
+      item,
+      rank: exactBarcode ? 0 : nameStarts ? 1 : 2,
+    });
+  }
+  scored.sort((a, b) => a.rank - b.rank || String(a.item.name).localeCompare(String(b.item.name)));
+  return scored.slice(0, Math.max(1, Math.min(40, limit))).map((entry) => entry.item);
+}
+
 export async function putCatalogItems(items = []) {
   const list = items.filter((item) => item?.id);
   if (!list.length) return;

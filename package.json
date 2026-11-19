@@ -10,13 +10,16 @@
     "dev": "concurrently -n api,web -c dim,magenta \"node server/src/index.js\" \"vite --config client/vite.config.js\"",
     "build": "vite build --config client/vite.config.js",
     "start": "NODE_ENV=production node app.js",
-    "seed:reset": "rm -f server/data/db.json && node -e \"require('./server/src/store').load()\""
+    "db:migrate": "node server/src/db/migrate.js",
+    "db:import-json": "node server/src/db/importJson.js",
+    "seed:reset": "node server/src/db/seedReset.js"
   },
   "dependencies": {
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.21.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "mysql2": "^3.24.6",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

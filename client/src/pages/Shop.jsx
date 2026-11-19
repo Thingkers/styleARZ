@@ -3,8 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
-import { CategoryGlyph } from "../components/CategoryIcons";
+import { CategoryGlyph, categoriesMatch } from "../components/CategoryIcons";
 import { Empty, Loading, PageHeader } from "../components/ui";
+import {
+  CATEGORY_AUDIENCE_RULES,
+  allowedAudiencesForCategory,
+  categoriesForAudience,
+} from "./admin/inventoryUtils";
 
 export default function Shop() {
   const [params, setParams] = useSearchParams();
@@ -13,11 +18,40 @@ export default function Shop() {
   const occasion = params.get("occasion") || "";
   const audience = params.get("audience") || "";
   const [products, setProducts] = useState([]);
-  const [meta, setMeta] = useState({ categories: [], occasions: [], audiences: ["Men", "Women", "Children"] });
+  const [meta, setMeta] = useState({
+    categories: [],
+    occasions: [],
+    audiences: ["Men", "Women", "Children"],
+    rules: CATEGORY_AUDIENCE_RULES,
+  });
   const [sort, setSort] = useState("featured");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useDocumentTitle(q ? `Search · ${q}` : "Shop");
+
+  const rules = meta.rules || CATEGORY_AUDIENCE_RULES;
+  const audienceOptions = useMemo(() => {
+    const base = (meta.audiences || ["Men", "Women", "Children"]).filter((item) => item !== "Unisex");
+    if (!category) return base;
+    const allowed = allowedAudiencesForCategory(category, rules);
+    return base.filter((item) => allowed.includes(item));
+  }, [meta.audiences, category, rules]);
+
+  const categoryOptions = useMemo(() => {
+    const list = meta.categories || [];
+    if (!audience) return list;
+    return categoriesForAudience(list, audience, rules);
+  }, [meta.categories, audience, rules]);
+
+  // Drop meaningless pairs from the URL (e.g. Saree + Men, Panjabi + Women).
+  useEffect(() => {
+    if (!category || !audience) return;
+    const allowed = allowedAudiencesForCategory(category, rules);
+    if (allowed.includes(audience)) return;
+    const next = new URLSearchParams(params);
+    next.delete("audience");
+    setParams(next, { replace: true });
+  }, [category, audience, rules, params, setParams]);
 
   useEffect(() => {
     setLoading(true);
@@ -25,16 +59,20 @@ export default function Shop() {
     if (q) query.set("q", q);
     if (category) query.set("category", category);
     if (occasion) query.set("occasion", occasion);
-    if (audience) query.set("audience", audience);
+    const effectiveAudience =
+      category && audience && !allowedAudiencesForCategory(category, rules).includes(audience)
+        ? ""
+        : audience;
+    if (effectiveAudience) query.set("audience", effectiveAudience);
     api(`/api/products?${query.toString()}`)
       .then((data) => setProducts(data.products))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [q, category, occasion, audience]);
+  }, [q, category, occasion, audience, rules]);
 
   useEffect(() => {
     api("/api/meta")
-      .then(setMeta)
+      .then((data) => setMeta({ ...data, rules: data.rules || CATEGORY_AUDIENCE_RULES }))
       .catch(() => {});
   }, []);
 
@@ -50,26 +88,50 @@ export default function Shop() {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
     else next.delete(key);
+
+    if (key === "category") {
+      const nextCategory = value || "";
+      const currentAudience = next.get("audience") || "";
+      if (nextCategory && currentAudience) {
+        const allowed = allowedAudiencesForCategory(nextCategory, rules);
+        if (!allowed.includes(currentAudience)) next.delete("audience");
+      }
+    }
+
+    if (key === "audience") {
+      const nextAudience = value || "";
+      const currentCategory = next.get("category") || "";
+      if (nextAudience && currentCategory) {
+        const allowedCats = categoriesForAudience(meta.categories || [], nextAudience, rules);
+        const stillOk = allowedCats.some(
+          (entry) => entry === currentCategory || categoriesMatch(currentCategory, entry)
+        );
+        if (!stillOk) next.delete("category");
+      }
+    }
+
     setParams(next);
   }
+
+  const activeAudience = audienceOptions.includes(audience) ? audience : "";
 
   return (
     <div className="page wrap">
       <PageHeader
         kicker={q ? "Search results" : "Shop"}
-        title={q ? `Results for “${q}”` : audience ? `${audience}'s collection` : "The edit"}
+        title={q ? `Results for “${q}”` : activeAudience ? `${activeAudience}'s collection` : "The edit"}
         lede="Grade A export pieces for men, women, and children. Finished in Bangladesh, priced in taka."
       />
       <div className="filters">
         <div className="pills" role="tablist" aria-label="Collections">
-          <button type="button" className={!audience ? "on" : ""} onClick={() => setFilter("audience", "")}>
+          <button type="button" className={!activeAudience ? "on" : ""} onClick={() => setFilter("audience", "")}>
             All collections
           </button>
-          {(meta.audiences || ["Men", "Women", "Children"]).map((item) => (
+          {audienceOptions.map((item) => (
             <button
               key={item}
               type="button"
-              className={audience === item ? "on" : ""}
+              className={activeAudience === item ? "on" : ""}
               onClick={() => setFilter("audience", item)}
             >
               {item}
@@ -80,11 +142,11 @@ export default function Shop() {
           <button type="button" className={`category-filter-btn ${!category ? "on" : ""}`} onClick={() => setFilter("category", "")}>
             <span className="category-filter-all">All</span>
           </button>
-          {meta.categories.map((item) => (
+          {categoryOptions.map((item) => (
             <button
               key={item}
               type="button"
-              className={`category-filter-btn ${category === item ? "on" : ""}`}
+              className={`category-filter-btn ${category === item || categoriesMatch(category, item) ? "on" : ""}`}
               onClick={() => setFilter("category", item)}
             >
               <CategoryGlyph name={item} />

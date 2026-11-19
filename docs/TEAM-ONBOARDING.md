@@ -11,12 +11,15 @@ git clone https://github.com/Thingkers/styleARZ.git
 cd styleARZ
 npm install
 cp .env.example .env
+# set JWT_SECRET and MYSQL_* for a local MySQL 8 instance
+npm run db:migrate
+npm run seed:reset
 npm run dev
 ```
 
 Browser: **http://127.0.0.1:5173**
 
-Requires **Node.js 18+** (`node -v`).
+Requires **Node.js 18+** (`node -v`) and **MySQL 8**.
 
 ---
 

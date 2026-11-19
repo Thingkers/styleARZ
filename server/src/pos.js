@@ -56,6 +56,7 @@ function lineFromItem(item, qty) {
     name: item.name,
     color: item.color,
     size: item.size,
+    image: item.image || "",
     price: item.price,
     cost: item.cost,
     qty,
@@ -114,6 +115,35 @@ function findOpenSessionByCode(db, code) {
   expireSessions(db);
   const wanted = String(code || "").trim().toUpperCase();
   return db.posSessions.find((session) => session.status === "open" && session.code === wanted) || null;
+}
+
+function listOpenSessions(db) {
+  expireSessions(db);
+  return db.posSessions
+    .filter((session) => session.status === "open")
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
+    .map((session) => ({
+      id: session.id,
+      code: session.code,
+      mode: session.mode,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      expiresAt: session.expiresAt,
+      cartCount: Array.isArray(session.cart) ? session.cart.length : 0,
+    }));
+}
+
+/** Lookup only — used by USB scanner station and clients before adding to cart. */
+function lookupBarcode(db, barcode) {
+  const code = String(barcode || "").trim();
+  if (!code) throw httpError(400, "Scan a barcode first.");
+  const item = findByBarcode(db, code);
+  return {
+    barcode: code,
+    found: Boolean(item),
+    item: item ? { ...item } : null,
+    message: item ? `${item.name} is in inventory.` : `Barcode ${code} is not in the database.`,
+  };
 }
 
 function requireOpenSession(db, id) {
@@ -237,6 +267,9 @@ function finalizeSale(db, input = {}, user) {
   ensureCollections(db);
   const clientId = input.clientId ? String(input.clientId).slice(0, 64) : null;
   if (clientId) {
+    if (isSaleTombstoned(db, { clientId })) {
+      throw httpError(409, "This sale was deleted and cannot be recreated.");
+    }
     const existing = db.posSales.find((sale) => sale.clientId === clientId);
     if (existing) return { sale: existing, duplicate: true };
   }
@@ -261,6 +294,8 @@ function finalizeSale(db, input = {}, user) {
   const totals = pricing(lines, input.discount);
   const now = nowIso();
   applyStock(db, lines, now, false);
+  const customerPhone = normalizeCustomerPhone(input.customerPhone);
+  const customerName = String(input.customerName || "").trim().slice(0, 80);
   const sale = {
     id: randomId("sale"),
     receiptNo: nextReceiptNo(db),
@@ -270,6 +305,8 @@ function finalizeSale(db, input = {}, user) {
     ...totals,
     paymentMethod: paymentMethod(input.paymentMethod),
     note: String(input.note || "").trim().slice(0, 300),
+    customerPhone,
+    customerName,
     cashierId: user ? user.id : null,
     source: "online",
     createdAt: now,
@@ -278,6 +315,62 @@ function finalizeSale(db, input = {}, user) {
   db.posSales.unshift(sale);
   if (session) closeSession(db, session.id, "sold");
   return { sale, duplicate: false };
+}
+
+function normalizeCustomerPhone(raw) {
+  const digits = String(raw || "").replace(/[^\d+]/g, "").trim();
+  if (!digits) return "";
+  let phone = digits;
+  if (phone.startsWith("+880")) phone = `0${phone.slice(4)}`;
+  else if (phone.startsWith("880")) phone = `0${phone.slice(3)}`;
+  phone = phone.replace(/\D/g, "");
+  if (/^01\d{9}$/.test(phone)) return phone;
+  if (/^1\d{9}$/.test(phone)) return `0${phone}`;
+  // Keep a trimmed raw value if it is not BD-shaped yet — UI can still show it.
+  return String(raw || "").trim().slice(0, 20);
+}
+
+function findSaleById(db, id) {
+  ensureCollections(db);
+  return db.posSales.find((sale) => sale.id === id) || null;
+}
+
+function isSaleTombstoned(db, { id, clientId } = {}) {
+  ensureCollections(db);
+  return (db.posSalesDeleted || []).some(
+    (entry) => (id && entry.id === id) || (clientId && entry.clientId && entry.clientId === clientId)
+  );
+}
+
+function deleteSale(db, id, options = {}) {
+  ensureCollections(db);
+  const index = db.posSales.findIndex((sale) => sale.id === id);
+  if (index < 0) throw httpError(404, "Sale not found.");
+  const [sale] = db.posSales.splice(index, 1);
+  const now = nowIso();
+  const restoreStock = options.restoreStock !== false;
+  if (restoreStock) {
+    (sale.items || []).forEach((line) => {
+      const item = findById(db, line.itemId);
+      if (!item) return;
+      item.stock = Number(item.stock || 0) + Number(line.qty || 0);
+      item.updatedAt = now;
+      item.version = Number(item.version || 1) + 1;
+    });
+  }
+  db.posSalesDeleted = db.posSalesDeleted || [];
+  db.posSalesDeleted = db.posSalesDeleted.filter(
+    (entry) => entry.id !== sale.id && !(sale.clientId && entry.clientId === sale.clientId)
+  );
+  db.posSalesDeleted.unshift({
+    id: sale.id,
+    clientId: sale.clientId || null,
+    receiptNo: sale.receiptNo || null,
+    deletedAt: now,
+  });
+  // Keep tombstones bounded.
+  if (db.posSalesDeleted.length > 2000) db.posSalesDeleted.length = 2000;
+  return { sale };
 }
 
 function listSales(db, options = {}) {
@@ -306,6 +399,10 @@ function syncSales(db, sales, user, options = {}) {
     const clientId = incoming && incoming.clientId ? String(incoming.clientId).slice(0, 64) : "";
     if (!clientId) {
       conflicts.push({ clientId: null, reason: "missing_client_id", details: [] });
+      return;
+    }
+    if (isSaleTombstoned(db, { clientId })) {
+      accepted.push({ clientId, saleId: null, receiptNo: null, duplicate: true, deleted: true, warnings: [] });
       return;
     }
     const existing = db.posSales.find((sale) => sale.clientId === clientId);
@@ -386,6 +483,8 @@ function syncSales(db, sales, user, options = {}) {
       ...totals,
       paymentMethod: method,
       note: String(incoming.note || "").trim().slice(0, 300),
+      customerPhone: normalizeCustomerPhone(incoming.customerPhone),
+      customerName: String(incoming.customerName || "").trim().slice(0, 80),
       cashierId: user ? user.id : null,
       source: "offline",
       createdAt: Number.isNaN(soldAt) || soldAt > Date.now() ? now : new Date(soldAt).toISOString(),
@@ -417,12 +516,17 @@ module.exports = {
   createSession,
   findSessionById,
   findOpenSessionByCode,
+  listOpenSessions,
+  lookupBarcode,
   updateSession,
   closeSession,
   pushScanEvent,
   pullEvents,
   finalizeSale,
+  findSaleById,
+  deleteSale,
   listSales,
   syncSales,
   catalogSince,
+  normalizeCustomerPhone,
 };

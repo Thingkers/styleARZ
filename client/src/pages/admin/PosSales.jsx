@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { money, prettyDateTime } from "../../format";
 import { Empty, Loading } from "../../components/ui";
+import InvoicePanel from "../../pos/InvoicePanel";
 import { variantText } from "./inventoryUtils";
 
 const LIMIT = 200;
@@ -17,6 +18,8 @@ export default function PosSales() {
   const [error, setError] = useState("");
   const [method, setMethod] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
+  const [invoiceSale, setInvoiceSale] = useState(null);
+  const [deletingId, setDeletingId] = useState("");
 
   function load() {
     setRefreshing(true);
@@ -27,6 +30,25 @@ export default function PosSales() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setRefreshing(false));
+  }
+
+  async function deleteSale(sale) {
+    const label = sale.receiptNo || sale.id;
+    const ok = window.confirm(
+      `Delete sale ${label}?\n\nStock for its items will be restored. This cannot be undone from the list (offline devices will not recreate it).`
+    );
+    if (!ok) return;
+    setDeletingId(sale.id);
+    setError("");
+    try {
+      await api(`/api/pos/sales/${encodeURIComponent(sale.id)}`, { method: "DELETE" });
+      setSales((current) => (current || []).filter((row) => row.id !== sale.id));
+      if (invoiceSale?.id === sale.id) setInvoiceSale(null);
+    } catch (err) {
+      setError(err.message || "Could not delete sale.");
+    } finally {
+      setDeletingId("");
+    }
   }
 
   useEffect(() => {
@@ -48,7 +70,11 @@ export default function PosSales() {
   const units = shown.reduce((sum, sale) => sum + unitCount(sale), 0);
 
   return (
-    <div>
+    <div className={invoiceSale ? "pos-sales-with-invoice" : ""}>
+      {invoiceSale ? (
+        <InvoicePanel sale={invoiceSale} onClose={() => setInvoiceSale(null)} compact />
+      ) : null}
+
       <div className="stat-grid">
         <article>
           <p className="kicker">Sales</p>
@@ -145,7 +171,21 @@ export default function PosSales() {
                     {sale.source === "offline" && (
                       <p className="muted">Rung up offline · synced {prettyDateTime(sale.syncedAt)}</p>
                     )}
+                    {sale.customerPhone && <p className="muted">Phone: {sale.customerPhone}</p>}
                     {sale.note && <p className="muted">Note: {sale.note}</p>}
+                    <div className="sales-invoice-actions no-print">
+                      <button type="button" className="btn solid" onClick={() => setInvoiceSale(sale)}>
+                        Invoice · print / SMS
+                      </button>
+                      <button
+                        type="button"
+                        className="btn line"
+                        disabled={deletingId === sale.id}
+                        onClick={() => deleteSale(sale)}
+                      >
+                        {deletingId === sale.id ? "Deleting…" : "Delete sale"}
+                      </button>
+                    </div>
                   </div>
                 </details>
               </li>

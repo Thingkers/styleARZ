@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { money, prettyDate } from "../format";
 import { useDocumentTitle } from "../hooks";
@@ -8,11 +8,26 @@ import { InventoryEditor, InventoryList } from "./admin/Inventory";
 import Barcodes from "./admin/Barcodes";
 import Categories from "./admin/Categories";
 import HomeCollections from "./admin/HomeCollections";
+import HomeProducts from "./admin/HomeProducts";
+import LabelCapture from "./admin/LabelCapture";
+import Labels from "./admin/Labels";
 import PosSales from "./admin/PosSales";
+import Settings from "./admin/Settings";
+import UsbScanner from "./admin/UsbScanner";
 import { LOW_STOCK, stockLevel, stockText, variantText } from "./admin/inventoryUtils";
 
-export default function Admin() {
-  useDocumentTitle("Atelier");
+function AdminShell() {
+  const location = useLocation();
+  const captureMode = location.pathname.startsWith("/admin/labels/capture");
+
+  if (captureMode) {
+    return (
+      <Routes>
+        <Route path="labels/capture" element={<LabelCapture />} />
+      </Routes>
+    );
+  }
+
   return (
     <div className="page wrap">
       <PageHeader kicker="Atelier" title="Admin" lede="Orders, inventory, clients, and community moderation." />
@@ -22,11 +37,15 @@ export default function Admin() {
         </NavLink>
         <NavLink to="/pos">Open POS</NavLink>
         <NavLink to="/admin/home">Home</NavLink>
+        <NavLink to="/admin/home-products">Home products</NavLink>
         <NavLink to="/admin/inventory">Inventory</NavLink>
+        <NavLink to="/admin/labels">Quick Labels</NavLink>
         <NavLink to="/admin/categories">Categories</NavLink>
         <NavLink to="/admin/barcodes">Barcodes</NavLink>
+        <NavLink to="/admin/usb-scanner">USB scanner</NavLink>
         <NavLink to="/admin/pos-sales">POS sales</NavLink>
         <NavLink to="/admin/products">Products</NavLink>
+        <NavLink to="/admin/settings">Settings</NavLink>
         <NavLink to="/admin/orders">Orders</NavLink>
         <NavLink to="/admin/users">Users</NavLink>
         <NavLink to="/admin/moderation">Moderation</NavLink>
@@ -34,19 +53,29 @@ export default function Admin() {
       <Routes>
         <Route index element={<Overview />} />
         <Route path="home" element={<HomeCollections />} />
+        <Route path="home-products" element={<HomeProducts />} />
         <Route path="inventory" element={<InventoryList />} />
         <Route path="inventory/new" element={<InventoryEditor />} />
         <Route path="inventory/:id" element={<InventoryEditor />} />
+        <Route path="labels" element={<Labels />} />
+        <Route path="labels/capture" element={<LabelCapture />} />
         <Route path="categories" element={<Categories />} />
         <Route path="barcodes" element={<Barcodes />} />
+        <Route path="usb-scanner" element={<UsbScanner />} />
         <Route path="pos-sales" element={<PosSales />} />
         <Route path="products" element={<Products />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="orders" element={<Orders />} />
         <Route path="users" element={<Users />} />
         <Route path="moderation" element={<Moderation />} />
       </Routes>
     </div>
   );
+}
+
+export default function Admin() {
+  useDocumentTitle("Atelier");
+  return <AdminShell />;
 }
 
 function Overview() {
@@ -139,7 +168,8 @@ function Products() {
   const [dragId, setDragId] = useState("");
 
   function load() {
-    api("/api/products")
+    // Real sellable catalog only (listed inventory). Seed/home images live under Home products.
+    api("/api/products?kind=sellable")
       .then((data) => {
         setProducts(data.products);
         setDirty(false);
@@ -218,9 +248,10 @@ function Products() {
     <div className="catalog-order">
       <div className="inv-flow-head">
         <div>
-          <h2>Shop & home display</h2>
+          <h2>Shop products</h2>
           <p className="muted">
-            Drag to set shop order. Tick <strong>Home</strong> to show a piece on the homepage, then click Save.
+            Real sellable pieces from inventory (listed in the shop). Drag to set order. Fake/demo images are under{" "}
+            <strong>Home products</strong> only — they never appear here or in inventory import.
           </p>
         </div>
         <button type="button" className="btn solid" disabled={!dirty || saving} onClick={saveChanges}>
@@ -280,9 +311,11 @@ function Products() {
                     }}
                   />
                 </label>
-                <label className="catalog-featured">
+                <label className="admin-toggle catalog-featured">
+                  <span>Featured</span>
                   <input
                     type="checkbox"
+                    role="switch"
                     checked={Boolean(product.featured)}
                     onChange={(event) => {
                       event.stopPropagation();
@@ -290,7 +323,6 @@ function Products() {
                     }}
                     onClick={(event) => event.stopPropagation()}
                   />
-                  Show on Home
                 </label>
               </div>
             </div>

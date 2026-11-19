@@ -55,7 +55,7 @@ rsync -az --delete \
 # CloudLinux NodeJS Selector owns node_modules as a symlink into a venv.
 # Never npm-install into the app root from SSH after the app exists; use cPanel "Run NPM Install".
 echo "==> Ensuring app root has no real node_modules folder (CloudLinux requirement)"
-ssh "${SSH_OPTS[@]}" "$USER@$HOST" "cd '$REMOTE' && mkdir -p server/uploads/inventory server/data && if [ -d node_modules ] && [ ! -L node_modules ]; then rm -rf node_modules; echo removed_real_node_modules; elif [ -L node_modules ]; then echo symlink_ok; else echo no_node_modules; fi"
+ssh "${SSH_OPTS[@]}" "$USER@$HOST" "cd '$REMOTE' && mkdir -p server/uploads/inventory server/uploads/labels server/uploads/home server/data && if [ -d node_modules ] && [ ! -L node_modules ]; then rm -rf node_modules; echo removed_real_node_modules; elif [ -L node_modules ]; then echo symlink_ok; else echo no_node_modules; fi"
 
 echo "Done. Files are at $REMOTE"
 echo "In cPanel → Setup Node.js App (create if needed):"

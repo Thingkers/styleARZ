@@ -178,6 +178,38 @@ export const FEATURED_CATEGORIES = [
   { key: "T-Shirt", label: "T-Shirt", src: "/icons/categories/tshirt-glyph.png?v=7" },
 ];
 
+/** Alias groups so banner keys (Shirt) light up shop filters (Shirts) and match products. */
+const CATEGORY_GROUPS = [
+  ["Saree", "Sharee"],
+  ["Panjabi", "Punjabi"],
+  ["Dress", "Dresses"],
+  ["Jeans", "Jean", "Denim"],
+  ["Shirt", "Shirts"],
+  ["T-Shirt", "T-Shirts", "Tee", "Tees"],
+  ["Trousers", "Trouser", "Chinos", "Chino"],
+  ["Knitwear", "Knit"],
+  ["Outerwear", "Overshirt"],
+  ["Sets", "Set"],
+  ["Accessories", "Accessory"],
+];
+
+function normalizeCategory(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
+}
+
+export function categoriesMatch(a, b) {
+  if (!a || !b) return false;
+  const needle = normalizeCategory(a);
+  const group = CATEGORY_GROUPS.find((entries) => entries.some((entry) => normalizeCategory(entry) === needle));
+  const left = new Set((group || [a]).map(normalizeCategory));
+  const other = normalizeCategory(b);
+  const otherGroup = CATEGORY_GROUPS.find((entries) => entries.some((entry) => normalizeCategory(entry) === other));
+  return (otherGroup || [b]).some((entry) => left.has(normalizeCategory(entry)));
+}
+
 export function categoryIcon(name) {
   return BY_CATEGORY[name] || ShirtIcon;
 }

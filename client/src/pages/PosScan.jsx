@@ -6,11 +6,12 @@ import { canUseCameraScanner, startCameraScanner } from "../pos/scanner";
 import { canUsePairingQrScanner, copyPairingText, drawPairingQr, startPairingQrScanner } from "../pos/pairQr";
 import { createScannerPeer } from "../pos/webrtc";
 import PrepareOffline from "../pos/PrepareOffline";
+import { OFFLINE_PHONE_LINK_ENABLED } from "../pos/features";
 
 export default function PosScan() {
   useDocumentTitle("POS Scanner");
   const [params] = useSearchParams();
-  const autoPrepare = params.get("prepare") === "1";
+  const autoPrepare = OFFLINE_PHONE_LINK_ENABLED && params.get("prepare") === "1";
   const [code, setCode] = useState(() => String(params.get("c") || "").trim().toUpperCase());
   const [session, setSession] = useState(null);
   const [manual, setManual] = useState("");
@@ -19,7 +20,7 @@ export default function PosScan() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [offlineMode, setOfflineMode] = useState(!navigator.onLine);
+  const [offlineMode, setOfflineMode] = useState(OFFLINE_PHONE_LINK_ENABLED && !navigator.onLine);
   const [offerDraft, setOfferDraft] = useState("");
   const [answerPayload, setAnswerPayload] = useState("");
   const [rtcStatus, setRtcStatus] = useState("idle");
@@ -42,7 +43,8 @@ export default function PosScan() {
     const update = () => {
       const next = navigator.onLine;
       setOnline(next);
-      if (!next) setOfflineMode(true);
+      if (!next && OFFLINE_PHONE_LINK_ENABLED) setOfflineMode(true);
+      if (!OFFLINE_PHONE_LINK_ENABLED) setOfflineMode(false);
     };
     window.addEventListener("online", update);
     window.addEventListener("offline", update);
@@ -313,42 +315,52 @@ export default function PosScan() {
 
   return (
     <div className="pos-scan-page">
-      <header>
+      <header className="pos-header">
         <div>
-          <p className="kicker light">StyleARZ POS</p>
+          <p className="kicker light">
+            <Link to="/admin" className="pos-brand-link">
+              StyleARZ POS
+            </Link>
+          </p>
           <h1>Remote scanner</h1>
         </div>
-        <span className={`pos-online ${online ? "is-online" : ""}`}>{online ? "Online" : "Offline"}</span>
+        <div className="pos-header-actions">
+          <span className={`pos-online ${online ? "is-online" : ""}`}>{online ? "Online" : "Offline"}</span>
+          <Link to="/admin">Admin home</Link>
+          <Link to="/pos">Counter</Link>
+        </div>
       </header>
 
-      <PrepareOffline role="phone" auto={autoPrepare} />
+      {OFFLINE_PHONE_LINK_ENABLED ? <PrepareOffline role="phone" auto={autoPrepare} /> : null}
 
-      <div className="pos-scan-mode-toggle">
-        <button
-          type="button"
-          className={!offlineMode ? "active" : ""}
-          onClick={() => {
-            setOfflineMode(false);
-            scannerPeerRef.current?.close();
-            setRtcStatus("idle");
-          }}
-          disabled={!online}
-        >
-          Online code
-        </button>
-        <button
-          type="button"
-          className={offlineMode ? "active" : ""}
-          onClick={() => {
-            setOfflineMode(true);
-            setSession(null);
-          }}
-        >
-          Offline WebRTC
-        </button>
-      </div>
+      {OFFLINE_PHONE_LINK_ENABLED ? (
+        <div className="pos-scan-mode-toggle">
+          <button
+            type="button"
+            className={!offlineMode ? "active" : ""}
+            onClick={() => {
+              setOfflineMode(false);
+              scannerPeerRef.current?.close();
+              setRtcStatus("idle");
+            }}
+            disabled={!online}
+          >
+            Online code
+          </button>
+          <button
+            type="button"
+            className={offlineMode ? "active" : ""}
+            onClick={() => {
+              setOfflineMode(true);
+              setSession(null);
+            }}
+          >
+            Offline WebRTC
+          </button>
+        </div>
+      ) : null}
 
-      {offlineMode ? (
+      {OFFLINE_PHONE_LINK_ENABLED && offlineMode ? (
         <section className="pos-card pos-webrtc">
           <h2>Offline pair</h2>
           <p className="muted">

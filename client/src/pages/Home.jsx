@@ -67,8 +67,6 @@ export default function Home() {
               <p className="hero-tag">your personal fashion statement</p>
             </div>
             <h1>Export casuals, made for how Bangladesh dresses.</h1>
-          </div>
-          <div className="hero-side">
             <p className="hero-lede">
               Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
               specs, priced for everyday.

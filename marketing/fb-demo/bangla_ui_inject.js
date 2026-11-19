@@ -113,20 +113,11 @@
   };
 
   // Neutral product branding during demo (provider name only appears at video end cards).
-  document.querySelectorAll(".logo-style").forEach((el) => {
+  document.querySelectorAll(".logo-lockup").forEach((el) => {
     el.textContent = "PORTAL";
-  });
-  document.querySelectorAll(".logo-arz").forEach((el) => {
-    el.textContent = "";
   });
   document.querySelectorAll(".logo-tag").forEach((el) => {
     el.textContent = "প্রতিষ্ঠান · ইনভেন্টরি · পিওএস";
-  });
-  document.querySelectorAll(".hero-lockup .logo-style").forEach((el) => {
-    el.textContent = "PORTAL";
-  });
-  document.querySelectorAll(".hero-lockup .logo-arz").forEach((el) => {
-    el.textContent = "";
   });
   walk(document.body);
   // Remove any leftover StyleARZ / Thingkers text nodes from chrome

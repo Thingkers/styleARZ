@@ -5,9 +5,14 @@ import { money, prettyDate } from "../../format";
 import { Empty, Loading } from "../../components/ui";
 import ItemPhoto from "./ItemPhoto";
 import {
+  AUDIENCES,
   CATEGORIES,
+  CATEGORY_AUDIENCE_RULES,
   QUICK_SIZES,
+  allowedAudiencesForCategory,
   barcodeSrc,
+  categoriesForAudience,
+  categoryName,
   fetchBarcodes,
   stockLevel,
   stockText,
@@ -15,7 +20,7 @@ import {
 } from "./inventoryUtils";
 import { colourFromImage } from "./colorFromImage";
 
-const FIELDS = ["name", "color", "colorHex", "size", "category", "price", "cost", "stock", "notes", "listed"];
+const FIELDS = ["name", "color", "colorHex", "size", "category", "audience", "price", "cost", "stock", "notes", "listed", "featured"];
 const NUMBER_FIELDS = ["price", "cost", "stock"];
 const EMPTY_FORM = {
   name: "",
@@ -24,11 +29,13 @@ const EMPTY_FORM = {
   size: "",
   sizes: [],
   category: "",
+  audience: "Unisex",
   price: "",
   cost: "",
   stock: "1",
   notes: "",
   listed: true,
+  featured: false,
 };
 const STEPS = [
   { id: "photo", label: "Photo" },
@@ -44,11 +51,13 @@ function toForm(item) {
     size: item.size || "",
     sizes: item.size ? [item.size] : [],
     category: item.category || "",
+    audience: AUDIENCES.includes(item.audience) ? item.audience : "Unisex",
     price: String(item.price ?? ""),
     cost: item.cost ? String(item.cost) : "",
     stock: String(item.stock ?? 0),
     notes: item.notes || "",
     listed: item.listed !== false,
+    featured: Boolean(item.featured),
   };
 }
 
@@ -59,11 +68,13 @@ function toPayload(form) {
     colorHex: (form.colorHex || "").trim(),
     size: form.size.trim(),
     category: form.category.trim(),
+    audience: AUDIENCES.includes(form.audience) ? form.audience : "Unisex",
     price: Number(form.price),
     cost: form.cost.trim() === "" ? 0 : Number(form.cost),
     stock: form.stock.trim() === "" ? 0 : Number(form.stock),
     notes: form.notes.trim(),
     listed: form.listed !== false,
+    featured: Boolean(form.featured),
   };
 }
 
@@ -73,8 +84,14 @@ function selectedSizes(form) {
   return single ? [single] : [];
 }
 
-function validate(form, { multiSize = false } = {}) {
+function validate(form, { multiSize = false, rules = CATEGORY_AUDIENCE_RULES } = {}) {
   if (form.name.trim().length < 2) return "Give the item a name (at least 2 characters).";
+  if (!AUDIENCES.includes(form.audience)) return "Pick a collection (Men, Women, Children, or Unisex).";
+  if (!form.category.trim()) return "Pick a category for this collection.";
+  const allowed = allowedAudiencesForCategory(form.category, rules);
+  if (!allowed.includes(form.audience)) {
+    return `“${form.category.trim()}” cannot be ${form.audience}. Allowed: ${allowed.join(", ")}.`;
+  }
   if (form.price.trim() === "" || !(Number(form.price) >= 0)) return "Enter a selling price.";
   if (form.cost.trim() !== "" && !(Number(form.cost) >= 0)) return "Cost must be zero or more.";
   const stock = form.stock.trim() === "" ? 0 : Number(form.stock);
@@ -89,6 +106,7 @@ function changedFields(item, form) {
   FIELDS.forEach((field) => {
     let current = item[field];
     if (field === "listed") current = item.listed !== false;
+    if (field === "featured") current = Boolean(item.featured);
     else if (current === undefined || current === null) current = NUMBER_FIELDS.includes(field) ? 0 : "";
     if (next[field] !== current) patch[field] = next[field];
   });
@@ -120,13 +138,17 @@ function ActionBar({ error, children }) {
 function useSuggestions() {
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState(CATEGORIES);
+  const [rules, setRules] = useState(CATEGORY_AUDIENCE_RULES);
 
   useEffect(() => {
     api("/api/inventory")
       .then((data) => setItems(data.items))
       .catch(() => {});
     api("/api/inventory/categories")
-      .then((data) => setCategories(data.categories?.length ? data.categories : CATEGORIES))
+      .then((data) => {
+        setCategories(data.categories?.length ? data.categories : CATEGORIES);
+        if (data.rules) setRules(data.rules);
+      })
       .catch(() => {});
   }, []);
 
@@ -141,10 +163,13 @@ function useSuggestions() {
     };
     return {
       categories,
+      categoryNames: categories.map(categoryName).filter(Boolean),
       colors: collect("color", []),
       sizes: collect("size", QUICK_SIZES),
+      audiences: AUDIENCES,
+      rules,
     };
-  }, [items, categories]);
+  }, [items, categories, rules]);
 }
 
 export function InventoryList() {
@@ -176,7 +201,7 @@ export function InventoryList() {
   async function importCatalog() {
     if (
       !window.confirm(
-        "Import all shop products into inventory? Each size gets a barcode for POS. Shop listings stay as they are (no duplicates)."
+        "Import sellable shop products into inventory? Homepage image-only products are skipped. Each size gets a barcode for POS."
       )
     ) {
       return;
@@ -189,8 +214,8 @@ export function InventoryList() {
       setItems(data.items);
       setNotice(
         data.createdCount
-          ? `Imported ${data.createdCount} inventory rows from the shop catalog.`
-          : "Shop products were already in inventory — nothing new to add."
+          ? `Imported ${data.createdCount} inventory rows from sellable shop products.`
+          : "Sellable shop products were already in inventory (or only homepage images remain) — nothing new to add."
       );
     } catch (err) {
       setError(err.message);
@@ -435,6 +460,12 @@ export function InventoryList() {
 }
 
 function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint }) {
+  const rules = suggestions.rules || CATEGORY_AUDIENCE_RULES;
+  const audience = AUDIENCES.includes(form.audience) ? form.audience : "Unisex";
+  const categoryOptions = categoriesForAudience(suggestions.categories, audience, rules);
+  const audienceOptions = form.category.trim()
+    ? allowedAudiencesForCategory(form.category, rules)
+    : AUDIENCES;
   const set = (field) => (event) => onChange({ ...form, [field]: event.target.value });
   const values = toPayload(form);
   const margin = marginPercent(values.price, values.cost);
@@ -473,8 +504,52 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
         />
       </label>
       <label>
+        Collection
+        <select
+          value={audienceOptions.includes(audience) ? audience : audienceOptions[0] || ""}
+          onChange={(event) => {
+            const nextAudience = event.target.value;
+            const allowed = categoriesForAudience(suggestions.categories, nextAudience, rules);
+            onChange({
+              ...form,
+              audience: nextAudience,
+              category: allowed.includes(form.category) ? form.category : "",
+            });
+          }}
+        >
+          {AUDIENCES.map((value) => {
+            const allowed = audienceOptions.includes(value);
+            return (
+              <option key={value} value={value} disabled={!allowed}>
+                {value}
+                {!allowed ? " (not for this category)" : ""}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <label>
         Category
-        <input value={form.category} onChange={set("category")} maxLength={60} list="inv-categories" autoComplete="off" />
+        <select
+          value={form.category}
+          onChange={(event) => {
+            const nextCategory = event.target.value;
+            const allowed = allowedAudiencesForCategory(nextCategory, rules);
+            onChange({
+              ...form,
+              category: nextCategory,
+              audience: allowed.includes(form.audience) ? form.audience : allowed[0] || form.audience,
+            });
+          }}
+          required
+        >
+          <option value="">Select category</option>
+          {categoryOptions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Colour
@@ -592,20 +667,27 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
         />
       </label>
       {"listed" in form && (
-        <label className="span-2 inv-listed">
+        <label className="span-2 inv-listed admin-toggle">
+          <span>Show in online shop</span>
           <input
             type="checkbox"
+            role="switch"
             checked={form.listed !== false}
             onChange={(event) => onChange({ ...form, listed: event.target.checked })}
           />
-          Show this item in the online shop
         </label>
       )}
-      <datalist id="inv-categories">
-        {suggestions.categories.map((value) => (
-          <option key={value} value={value} />
-        ))}
-      </datalist>
+      {"featured" in form && (
+        <label className="span-2 inv-listed admin-toggle">
+          <span>Featured</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={Boolean(form.featured)}
+            onChange={(event) => onChange({ ...form, featured: event.target.checked })}
+          />
+        </label>
+      )}
       <datalist id="inv-colors">
         {suggestions.colors.map((value) => (
           <option key={value} value={value} />
@@ -630,7 +712,9 @@ function ItemPreview({ form, photo }) {
     <article className="inv-preview">
       <div className="inv-preview-media">{photo ? <img src={photo} alt="" /> : <span>No photo</span>}</div>
       <div className="inv-preview-body">
-        {values.category && <p className="kicker">{values.category}</p>}
+        {(values.audience || values.category) && (
+          <p className="kicker">{[values.audience, values.category].filter(Boolean).join(" · ")}</p>
+        )}
         <h3>{values.name}</h3>
         <p className="muted">
           {[values.color, sizes.join(", ")].filter(Boolean).join(" · ") || "No colour or size"}
@@ -682,7 +766,7 @@ function AddItem() {
   const [saving, setSaving] = useState(false);
 
   const requested = STEPS.some((entry) => entry.id === searchParams.get("step")) ? searchParams.get("step") : "photo";
-  const problem = validate(form, { multiSize: true });
+  const problem = validate(form, { multiSize: true, rules: suggestions.rules });
   const step = requested === "review" && problem ? "details" : requested;
   const stepIndex = STEPS.findIndex((entry) => entry.id === step);
   const flowRef = useRef(null);
@@ -996,7 +1080,7 @@ function EditItem({ id }) {
 
   async function save(event) {
     event.preventDefault();
-    const problem = validate(form);
+    const problem = validate(form, { rules: suggestions.rules });
     if (problem) {
       setError(problem);
       return;

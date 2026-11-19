@@ -1,35 +1,73 @@
-const fs = require("fs");
-const path = require("path");
-const { buildSeed } = require("./seed");
+const { getPool } = require("./db/pool");
+const { migrate } = require("./db/migrate");
+const { loadAll, saveAll } = require("./db/persist");
+const { buildSeed, ensureIconCategoryProducts, ensureFakeCatalogMovedToHome } = require("./seed");
 const { ensureCollections, ensureSortOrders } = require("./inventory");
+const { ensureLabelDrafts } = require("./labels");
 const { ensureHomeCollections } = require("./home");
 
-const file = path.join(__dirname, "..", "data", "db.json");
 let db;
+let saving = Promise.resolve();
 
-function load() {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (!fs.existsSync(file)) {
-    db = buildSeed();
-    ensureSortOrders(db);
-    ensureHomeCollections(db);
-    save();
-    return db;
-  }
-  db = JSON.parse(fs.readFileSync(file, "utf8"));
-  let dirty = ensureCollections(db);
-  if (ensureSortOrders(db)) dirty = true;
-  if (ensureHomeCollections(db)) dirty = true;
-  if (dirty) save();
-  return db;
+async function countUsers(connection) {
+  const [rows] = await connection.query("SELECT COUNT(*) AS c FROM users");
+  return Number(rows[0]?.c || 0);
 }
 
-function save() {
-  fs.writeFileSync(file, JSON.stringify(db, null, 2));
+function prepareSeed() {
+  const next = buildSeed();
+  ensureCollections(next);
+  ensureSortOrders(next);
+  ensureHomeCollections(next);
+  ensureIconCategoryProducts(next);
+  ensureFakeCatalogMovedToHome(next);
+  ensureLabelDrafts(next);
+  return next;
+}
+
+async function load() {
+  await migrate();
+  const pool = getPool();
+  const connection = await pool.getConnection();
+  try {
+    const userCount = await countUsers(connection);
+    if (userCount === 0) {
+      db = prepareSeed();
+    } else {
+      db = await loadAll(connection);
+      let dirty = ensureCollections(db);
+      if (ensureSortOrders(db)) dirty = true;
+      if (ensureHomeCollections(db)) dirty = true;
+      if (ensureIconCategoryProducts(db)) dirty = true;
+      if (ensureFakeCatalogMovedToHome(db)) dirty = true;
+      if (ensureLabelDrafts(db)) dirty = true;
+      if (!dirty) return db;
+    }
+  } finally {
+    connection.release();
+  }
+  await save();
+  return db;
 }
 
 function get() {
+  if (!db) throw new Error("Database has not been loaded yet.");
   return db;
 }
 
-module.exports = { load, save, get };
+async function save() {
+  if (!db) throw new Error("Database has not been loaded yet.");
+  const snapshot = db;
+  saving = saving
+    .catch(() => {})
+    .then(() => saveAll(snapshot));
+  return saving;
+}
+
+async function resetWithSeed() {
+  db = prepareSeed();
+  await save();
+  return db;
+}
+
+module.exports = { load, save, get, resetWithSeed };
