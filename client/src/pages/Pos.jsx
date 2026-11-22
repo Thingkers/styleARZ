@@ -26,6 +26,93 @@ function newClientId() {
   return globalThis.crypto?.randomUUID?.() || `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/**
+ * USB barcode scanner (HID keyboard mode) listener.
+ *
+ * Works anywhere on the POS page — no pairing, no connector page.
+ * - Scanners type very fast (a few ms between keys) and usually end with Enter.
+ *   If Enter is missing, the code is submitted after a short pause.
+ * - Works even when the product search box is focused: the scan is intercepted,
+ *   added to the cart, and the characters are removed from the search box.
+ * - Ignored in number / tel / textarea / select fields (discount, customer phone).
+ */
+function useUsbScanner(onScan) {
+  const cbRef = useRef(onScan);
+  cbRef.current = onScan;
+
+  useEffect(() => {
+    let buffer = "";
+    let last = 0;
+    let timer;
+    let field = null; // text input that received the scanned characters
+
+    const clearField = () => {
+      if (!field) return;
+      const code = buffer;
+      const value = field.value || "";
+      const next = value.endsWith(code) ? value.slice(0, value.length - code.length) : value;
+      if (next !== value) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(field, next);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    };
+
+    const reset = () => {
+      buffer = "";
+      field = null;
+    };
+
+    const flush = () => {
+      clearTimeout(timer);
+      const code = buffer.trim();
+      if (code.length >= 4) {
+        clearField();
+        reset();
+        cbRef.current(code);
+      } else {
+        reset();
+      }
+    };
+
+    const onKey = (e) => {
+      const el = e.target;
+      const tag = el?.tagName;
+      const type = (el?.type || "").toLowerCase();
+      if (tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      if (tag === "INPUT" && (type === "number" || type === "tel" || type === "password")) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === "Enter") {
+        if (buffer.length >= 4) {
+          e.preventDefault();
+          e.stopPropagation(); // stop the search box / buttons from also reacting to this Enter
+          flush();
+        } else {
+          reset();
+        }
+        return;
+      }
+      if (e.key.length !== 1) return;
+
+      const now = Date.now();
+      if (now - last > 50) reset(); // humans type slowly, scanners type fast
+      last = now;
+      buffer += e.key;
+      field = tag === "INPUT" ? el : null;
+      clearTimeout(timer);
+      timer = setTimeout(flush, 120); // works even if the scanner sends no Enter
+    };
+
+    // capture phase so we see the keys before the focused input handles them
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      clearTimeout(timer);
+    };
+  }, []);
+}
+
 function ScannerPanel({ onBarcode, onPick, busy, cart, onOpenCart }) {
   const videoRef = useRef(null);
   const sessionRef = useRef(null);
@@ -414,11 +501,7 @@ function Pairing({
           <h2>{session.code}</h2>
           <canvas ref={qrRef} aria-label={`QR code for session ${session.code}`} />
           <p className="pos-scan-url">
-            USB scanner (colleague PC): open{" "}
-            <a href="/admin/usb-scanner" target="_blank" rel="noreferrer">
-              Admin → USB scanner
-            </a>
-            , connect with code <strong>{session.code}</strong>, then scan.
+            USB scanner: just plug it in and scan on this page. No pairing needed.
           </p>
           <p className="pos-scan-url">
             Phone camera scanner:
@@ -765,6 +848,9 @@ export default function Pos() {
   }, [addItem]);
 
   addBarcodeRef.current = addBarcode;
+
+  // USB barcode scanner: scan anywhere on this page, the item goes straight to the cart.
+  useUsbScanner((code) => addBarcodeRef.current?.(code));
 
   async function startOfflinePair() {
     setError("");
