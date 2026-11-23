@@ -7,6 +7,7 @@ const { ensureCollections, ensureSortOrders } = require("../inventory");
 const { ensureLabelDrafts } = require("../labels");
 const { ensureHomeCollections } = require("../home");
 const { ensureIconCategoryProducts, ensureFakeCatalogMovedToHome } = require("../seed");
+const { ensureGrandOpeningCampaign } = require("../offers");
 
 function loadEnv() {
   const envPath = path.join(__dirname, "..", "..", "..", ".env");
@@ -41,6 +42,7 @@ async function importJson(filePath) {
   ensureHomeCollections(db);
   ensureIconCategoryProducts(db);
   ensureFakeCatalogMovedToHome(db);
+  ensureGrandOpeningCampaign(db);
   ensureLabelDrafts(db);
   await migrate();
   await saveAll(db);

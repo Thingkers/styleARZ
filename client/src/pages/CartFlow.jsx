@@ -73,6 +73,7 @@ export function Checkout() {
     city: "",
     country: "Bangladesh",
     notes: "",
+    paymentMethod: "cod",
     card: "",
     expiry: "",
     cvc: "",
@@ -80,6 +81,7 @@ export function Checkout() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const shipping = shippingFor(subtotal);
+  const payByCard = form.paymentMethod === "card";
 
   useEffect(() => {
     if (user) {
@@ -98,14 +100,18 @@ export function Checkout() {
   async function onSubmit(event) {
     event.preventDefault();
     setError("");
-    const digits = form.card.replace(/\s/g, "");
-    if (!/^\d{16}$/.test(digits)) {
-      setError("Enter a 16-digit card number. This checkout is a demonstration and does not charge the card.");
-      return;
-    }
-    if (!/^\d{2}\/\d{2}$/.test(form.expiry) || !/^\d{3,4}$/.test(form.cvc)) {
-      setError("Enter an expiry as MM/YY and a CVC.");
-      return;
+    let paymentLast4 = null;
+    if (form.paymentMethod === "card") {
+      const digits = form.card.replace(/\s/g, "");
+      if (!/^\d{16}$/.test(digits)) {
+        setError("Enter a 16-digit card number. Card checkout is a demonstration and does not charge the card.");
+        return;
+      }
+      if (!/^\d{2}\/\d{2}$/.test(form.expiry) || !/^\d{3,4}$/.test(form.cvc)) {
+        setError("Enter an expiry as MM/YY and a CVC.");
+        return;
+      }
+      paymentLast4 = digits.slice(-4);
     }
     setBusy(true);
     try {
@@ -119,7 +125,8 @@ export function Checkout() {
           city: form.city,
           country: form.country,
           notes: form.notes,
-          paymentLast4: digits.slice(-4),
+          paymentMethod: form.paymentMethod,
+          paymentLast4,
           items: cart.map((item) => ({
             productId: item.productId,
             size: item.size,
@@ -151,7 +158,7 @@ export function Checkout() {
       <PageHeader
         kicker="Checkout"
         title="Delivery and confirmation"
-        lede="Demonstration checkout. The card number is checked in the browser and is not stored. Only the last four digits are kept with the order."
+        lede="Choose cash on delivery or card. Card numbers are checked in the browser only — nothing is charged or stored beyond the last four digits."
       />
       <form className="cart-layout" onSubmit={onSubmit}>
         <div className="stack">
@@ -181,25 +188,60 @@ export function Checkout() {
               City
               <input required value={form.city} onChange={(event) => set("city", event.target.value)} />
             </label>
-            <label>
-              Card number
-              <input
-                required
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder="•••• •••• •••• ••••"
-                value={form.card}
-                onChange={(event) => set("card", event.target.value)}
-              />
-            </label>
-            <label>
-              Expiry
-              <input required placeholder="MM/YY" value={form.expiry} onChange={(event) => set("expiry", event.target.value)} />
-            </label>
-            <label>
-              CVC
-              <input required placeholder="123" value={form.cvc} onChange={(event) => set("cvc", event.target.value)} />
-            </label>
+            <fieldset className="span-2 checkout-pay">
+              <legend>Payment</legend>
+              <div className="checkout-pay-options" role="radiogroup" aria-label="Payment method">
+                <label className={`checkout-pay-option ${form.paymentMethod === "cod" ? "is-active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value="cod"
+                    checked={form.paymentMethod === "cod"}
+                    onChange={() => set("paymentMethod", "cod")}
+                  />
+                  <strong>Cash on delivery</strong>
+                  <span>Pay the courier when your order arrives</span>
+                </label>
+                <label className={`checkout-pay-option ${form.paymentMethod === "card" ? "is-active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value="card"
+                    checked={form.paymentMethod === "card"}
+                    onChange={() => set("paymentMethod", "card")}
+                  />
+                  <strong>Card</strong>
+                  <span>Demonstration only — not charged</span>
+                </label>
+              </div>
+            </fieldset>
+            {payByCard ? (
+              <>
+                <label>
+                  Card number
+                  <input
+                    required
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="•••• •••• •••• ••••"
+                    value={form.card}
+                    onChange={(event) => set("card", event.target.value)}
+                  />
+                </label>
+                <label>
+                  Expiry
+                  <input required placeholder="MM/YY" value={form.expiry} onChange={(event) => set("expiry", event.target.value)} />
+                </label>
+                <label>
+                  CVC
+                  <input required placeholder="123" value={form.cvc} onChange={(event) => set("cvc", event.target.value)} />
+                </label>
+              </>
+            ) : (
+              <p className="span-2 muted checkout-cod-note">
+                No card needed. Keep the exact total ready for the delivery partner.
+              </p>
+            )}
             <label className="span-2">
               Note for the atelier
               <textarea rows="3" value={form.notes} onChange={(event) => set("notes", event.target.value)} />
@@ -220,9 +262,10 @@ export function Checkout() {
           </ul>
           <p><span>Subtotal</span><strong>{money(subtotal)}</strong></p>
           <p><span>Shipping</span><strong>{shipping === 0 ? "Complimentary" : money(shipping)}</strong></p>
+          <p><span>Payment</span><strong>{payByCard ? "Card" : "Cash on delivery"}</strong></p>
           <p className="total"><span>Total</span><strong>{money(subtotal + shipping)}</strong></p>
           <button className="btn solid" type="submit" disabled={busy}>
-            {busy ? "Placing order" : "Place order"}
+            {busy ? "Placing order" : payByCard ? "Place order" : "Place COD order"}
           </button>
         </aside>
       </form>
@@ -266,7 +309,12 @@ export function Confirmation() {
             ))}
           </ul>
           <p className="total"><span>Total</span><strong>{money(order.total)}</strong></p>
-          <p className="muted">Paid with card ending {order.paymentLast4}. Placed {prettyDate(order.createdAt)}.</p>
+          <p className="muted">
+            {order.paymentMethod === "cod" || (!order.paymentLast4 && order.paymentMethod !== "card")
+              ? "Cash on delivery — pay when the order arrives."
+              : `Paid with card ending ${order.paymentLast4}.`}{" "}
+            Placed {prettyDate(order.createdAt)}.
+          </p>
           <Link className="btn dark" to="/shop">Continue browsing</Link>
         </div>
       )}

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import { useAuth } from "../context/AuthContext";
+import { isStaff } from "../roles";
 import { PageHeader } from "../components/ui";
 
 export function Login() {
@@ -21,7 +22,8 @@ export function Login() {
     try {
       const user = await login(form.email, form.password);
       const next = params.get("next");
-      navigate(next || (user.role === "admin" ? "/admin" : "/"));
+      const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+      navigate(safeNext || (isStaff(user) ? "/admin" : "/"));
     } catch (err) {
       setError(err.message);
     } finally {

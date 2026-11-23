@@ -61,6 +61,10 @@ export async function queueSale(sale) {
     items: sale.items.map(({ itemId, qty, price, barcode }) => ({ itemId, qty, price, barcode })),
     paymentMethod: sale.paymentMethod,
     discount: Number(sale.discount) || 0,
+    discountPercent:
+      sale.discountPercent === undefined || sale.discountPercent === null || sale.discountPercent === ""
+        ? null
+        : Number(sale.discountPercent),
     customerPhone: sale.customerPhone || "",
     customerName: sale.customerName || "",
     note: sale.note || "",
@@ -73,8 +77,8 @@ export async function queueSale(sale) {
   return record;
 }
 
-function wireSale({ clientId, items, paymentMethod, discount, createdAt, customerPhone, customerName, note }) {
-  return { clientId, items, paymentMethod, discount, createdAt, customerPhone, customerName, note };
+function wireSale({ clientId, items, paymentMethod, discount, discountPercent, createdAt, customerPhone, customerName, note }) {
+  return { clientId, items, paymentMethod, discount, discountPercent, createdAt, customerPhone, customerName, note };
 }
 
 async function flush({ includeConflicts, force }) {

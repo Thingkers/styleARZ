@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { Loading } from "../../components/ui";
 
@@ -39,7 +40,9 @@ export default function Settings() {
         body: { smsSenderPhone },
       });
       setSmsSenderPhone(result.settings?.smsSenderPhone || "");
-      setNotice("SMS sender number saved. Invoice SMS will use this number’s balance.");
+      if (result.sms?.provider) setProvider(result.sms.provider);
+      if (result.sms?.configured !== undefined) setConfigured(result.sms.configured !== false);
+      setNotice("SMS sender number saved. Invoice and bulk SMS use this number’s balance.");
     } catch (err) {
       setError(err.message || "Could not save settings.");
     } finally {
@@ -52,10 +55,10 @@ export default function Settings() {
   return (
     <div className="admin-settings">
       <form className="admin-settings-card" onSubmit={save}>
-        <h2>Invoice SMS</h2>
+        <h2>SMS</h2>
         <p className="muted">
-          Save the shop mobile number used to send invoice SMS. Messages are billed against that number’s SMS balance
-          (via your SMS gateway account linked to it).
+          Save the shop mobile used as the SMS sender / balance account. Used for POS invoice SMS and{" "}
+          <Link to="/admin/messages">bulk Messages</Link>.
         </p>
         <label>
           SMS sender mobile (balance account)
@@ -70,6 +73,7 @@ export default function Settings() {
         <p className="muted">
           Gateway: <strong>{provider}</strong>
           {configured ? "" : " · not fully configured in server env"}
+          {provider === "log" ? " · log mode (no real SMS until you set SMS_PROVIDER)" : ""}
         </p>
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
@@ -77,6 +81,26 @@ export default function Settings() {
           {busy ? "Saving…" : "Save SMS number"}
         </button>
       </form>
+
+      <section className="admin-settings-card">
+        <h3>Connect a live gateway</h3>
+        <ol className="admin-settings-steps">
+          <li>Choose a Bangladesh SMS provider (or Twilio).</li>
+          <li>
+            In cPanel → Setup Node.js App → Environment, set{" "}
+            <code>SMS_PROVIDER=http</code> (or <code>twilio</code>) plus the provider keys. See{" "}
+            <code>docs/SMS_SETUP.md</code> in the repo.
+          </li>
+          <li>Save the sender number above, then Restart the Node app.</li>
+          <li>
+            Test one POS invoice SMS, then a 1–2 number blast from <Link to="/admin/messages">Messages</Link>.
+          </li>
+        </ol>
+        <p className="muted">
+          Until the gateway is set, <code>SMS_PROVIDER=log</code> only writes messages to the server log (safe for
+          testing).
+        </p>
+      </section>
     </div>
   );
 }

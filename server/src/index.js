@@ -11,7 +11,10 @@ const labels = require("./labels");
 const home = require("./home");
 const pos = require("./pos");
 const sms = require("./sms");
+const broadcast = require("./broadcast");
 const barcode = require("./barcode");
+const offers = require("./offers");
+const roles = require("./roles");
 const { productMatchesCategory, categoriesMatch } = require("./categoryMatch");
 
 function loadEnv() {
@@ -74,7 +77,12 @@ function requireUser(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== "admin") return fail(res, 403, "Atelier access only.");
+  if (!roles.isStaff(req.user)) return fail(res, 403, "Atelier access only.");
+  next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!roles.isSuperAdmin(req.user)) return fail(res, 403, "Shop owner (superadmin) access only.");
   next();
 }
 
@@ -341,11 +349,18 @@ app.post("/api/orders", async (req, res) => {
   const address = String(req.body.address || "").trim();
   const city = String(req.body.city || "").trim();
   const country = String(req.body.country || "").trim();
-  const last4 = String(req.body.paymentLast4 || "");
+  const paymentMethod = String(req.body.paymentMethod || "card").toLowerCase();
+  if (!["card", "cod"].includes(paymentMethod)) {
+    return fail(res, 400, "Choose card or cash on delivery.");
+  }
+  let last4 = "";
+  if (paymentMethod === "card") {
+    last4 = String(req.body.paymentLast4 || "");
+    if (!/^\d{4}$/.test(last4)) return fail(res, 400, "Enter a card so we can confirm the last four digits.");
+  }
   if (name.length < 2) return fail(res, 400, "Enter the recipient name.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, "Enter a valid email.");
   if (!address || !city || !country) return fail(res, 400, "Enter a full delivery address.");
-  if (!/^\d{4}$/.test(last4)) return fail(res, 400, "Enter a card so we can confirm the last four digits.");
   priced.items.forEach((item) => {
     const shop = db.products.find((entry) => entry.id === item.productId);
     if (shop) {
@@ -369,13 +384,19 @@ app.post("/api/orders", async (req, res) => {
     subtotal: priced.subtotal,
     shipping: priced.shipping,
     total: priced.total,
-    paymentLast4: last4,
+    paymentMethod,
+    paymentLast4: paymentMethod === "card" ? last4 : null,
     status: "confirmed",
     createdAt: new Date().toISOString(),
   };
   db.orders.unshift(order);
   if (req.user) {
-    notify(req.user.id, `Order ${order.id} confirmed`, `${priced.items.length} piece${priced.items.length === 1 ? "" : "s"} confirmed. The atelier will pack them next.`);
+    const payNote = paymentMethod === "cod" ? " Cash on delivery." : "";
+    notify(
+      req.user.id,
+      `Order ${order.id} confirmed`,
+      `${priced.items.length} piece${priced.items.length === 1 ? "" : "s"} confirmed.${payNote} The atelier will pack them next.`
+    );
   }
   await store.save();
   res.status(201).json({ order });
@@ -585,7 +606,7 @@ app.get("/api/quiz", async (req, res) => {
   res.json({ result: req.user.preferences, products });
 });
 
-app.get("/api/admin/settings", requireAdmin, async (req, res) => {
+app.get("/api/admin/settings", requireSuperAdmin, async (req, res) => {
   const settings = db.settings && typeof db.settings === "object" ? db.settings : {};
   res.json({
     settings: {
@@ -598,7 +619,7 @@ app.get("/api/admin/settings", requireAdmin, async (req, res) => {
   });
 });
 
-app.put("/api/admin/settings", requireAdmin, handle(async (req, res) => {
+app.put("/api/admin/settings", requireSuperAdmin, handle(async (req, res) => {
   const body = req.body || {};
   const phoneRaw = body.smsSenderPhone !== undefined ? body.smsSenderPhone : db.settings?.smsSenderPhone;
   const normalized = phoneRaw ? sms.normalizeBdPhone(phoneRaw) : "";
@@ -612,19 +633,192 @@ app.put("/api/admin/settings", requireAdmin, handle(async (req, res) => {
     smsSenderPhone: normalized,
   };
   await store.save();
-  res.json({ settings: db.settings });
+  res.json({
+    settings: db.settings,
+    sms: {
+      provider: String(process.env.SMS_PROVIDER || "log"),
+      configured: sms.smsConfigured(),
+    },
+  });
+}));
+
+app.get("/api/admin/messages", requireSuperAdmin, handle(async (_req, res) => {
+  broadcast.ensureBroadcastCollections(db);
+  res.json({
+    audiences: broadcast.AUDIENCES,
+    counts: broadcast.audienceCounts(db),
+    broadcasts: broadcast.listBroadcasts(db),
+    sms: {
+      provider: String(process.env.SMS_PROVIDER || "log"),
+      configured: sms.smsConfigured(),
+      senderPhone: String(db.settings?.smsSenderPhone || "").trim(),
+    },
+  });
+}));
+
+app.post("/api/admin/messages/preview", requireSuperAdmin, handle(async (req, res) => {
+  const preview = await broadcast.sendBroadcast(db, { ...(req.body || {}), dryRun: true });
+  res.json(preview);
+}));
+
+app.post("/api/admin/messages/send", requireSuperAdmin, handle(async (req, res) => {
+  const result = await broadcast.sendBroadcast(db, { ...(req.body || {}), dryRun: false });
+  await store.save();
+  res.json(result);
+}));
+
+app.get("/api/offers", handle(async (_req, res) => {
+  res.json({
+    offers: offers.listPublicOffers(db),
+    slides: offers.listHeroSlides(db),
+    deck: offers.listHeroCards(db),
+  });
+}));
+
+app.get("/api/pos/offers/preview", requireAdmin, handle(async (req, res) => {
+  const preview = offers.previewOffer(db, {
+    phone: req.query.phone,
+    subtotal: req.query.subtotal,
+  });
+  res.json({ offer: preview });
+}));
+
+app.get("/api/admin/offers/templates", requireSuperAdmin, handle(async (_req, res) => {
+  res.json({ templates: offers.listTemplates() });
+}));
+
+function offerAdminPayload(campaign) {
+  return {
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+    customerSummary: offers.summarizeOfferCustomers(db, campaign.id),
+  };
+}
+
+app.post("/api/admin/offers/templates/:id/apply", requireSuperAdmin, handle(async (req, res) => {
+  const campaign = offers.applyTemplate(db, req.params.id, {
+    resetClaims: Boolean(req.body && req.body.resetClaims),
+    asNew: Boolean(req.body && req.body.asNew),
+  });
+  await store.save();
+  res.json(offerAdminPayload(campaign));
+}));
+
+app.post("/api/admin/offers/campaign", requireSuperAdmin, handle(async (req, res) => {
+  const campaign = offers.createCampaign(db, req.body || {});
+  await store.save();
+  res.status(201).json(offerAdminPayload(campaign));
+}));
+
+app.get("/api/admin/offers/campaign", requireSuperAdmin, handle(async (req, res) => {
+  const id = String(req.query.id || offers.GRAND_OPENING_ID);
+  const campaign = offers.getCampaign(db, id);
+  if (!campaign) return res.status(404).json({ error: "Offer campaign not found." });
+  res.json(offerAdminPayload(campaign));
+}));
+
+app.patch("/api/admin/offers/campaign", requireSuperAdmin, handle(async (req, res) => {
+  const body = req.body || {};
+  const id = String(body.id || req.query.id || offers.GRAND_OPENING_ID);
+  const campaign = offers.updateCampaign(db, body, id);
+  await store.save();
+  res.json(offerAdminPayload(campaign));
+}));
+
+app.post("/api/admin/offers/campaign/:id/image", requireSuperAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
+  const offerUploads = path.join(__dirname, "..", "uploads");
+  fs.mkdirSync(path.join(offerUploads, "offers"), { recursive: true });
+  const campaign = offers.setCampaignImage(db, req.params.id, offerUploads, req.body && req.body.image);
+  await store.save();
+  res.json(offerAdminPayload(campaign));
+}));
+
+app.delete("/api/admin/offers/campaign/:id", requireSuperAdmin, handle(async (req, res) => {
+  const offerUploads = path.join(__dirname, "..", "uploads");
+  offers.deleteCampaign(db, req.params.id, offerUploads);
+  const fallback = offers.getCampaign(db, offers.GRAND_OPENING_ID);
+  await store.save();
+  res.json({ ok: true, ...offerAdminPayload(fallback) });
+}));
+
+app.get("/api/admin/offers/customers", requireSuperAdmin, handle(async (req, res) => {
+  const campaignId = String(req.query.campaignId || offers.GRAND_OPENING_ID);
+  res.json({
+    customers: offers.listOfferCustomers(db, campaignId),
+    summary: offers.summarizeOfferCustomers(db, campaignId),
+  });
 }));
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
-  const revenue = db.orders
-    .filter((order) => order.status !== "cancelled")
-    .reduce((sum, order) => sum + order.total, 0);
+  const liveOrders = db.orders.filter((order) => order.status !== "cancelled");
+  const revenue = liveOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const posSales = db.posSales || [];
+  const posRevenue = posSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+
+  const dayCount = 14;
+  const dayKeys = [];
+  const cursor = new Date();
+  cursor.setHours(12, 0, 0, 0);
+  for (let i = dayCount - 1; i >= 0; i -= 1) {
+    const day = new Date(cursor);
+    day.setDate(cursor.getDate() - i);
+    dayKeys.push(day.toISOString().slice(0, 10));
+  }
+  const onlineByDay = Object.fromEntries(dayKeys.map((key) => [key, 0]));
+  const posByDay = Object.fromEntries(dayKeys.map((key) => [key, 0]));
+  liveOrders.forEach((order) => {
+    const key = String(order.createdAt || "").slice(0, 10);
+    if (key in onlineByDay) onlineByDay[key] += Number(order.total || 0);
+  });
+  posSales.forEach((sale) => {
+    const key = String(sale.createdAt || "").slice(0, 10);
+    if (key in posByDay) posByDay[key] += Number(sale.total || 0);
+  });
+
+  const statusOrder = ["confirmed", "packing", "shipped", "delivered", "cancelled"];
+  const statusCounts = Object.fromEntries(statusOrder.map((status) => [status, 0]));
+  db.orders.forEach((order) => {
+    const status = statusCounts[order.status] !== undefined ? order.status : "confirmed";
+    statusCounts[status] += 1;
+  });
+
+  const paymentMix = { card: 0, cod: 0, other: 0 };
+  liveOrders.forEach((order) => {
+    const method = String(order.paymentMethod || (order.paymentLast4 ? "card" : "other")).toLowerCase();
+    if (method === "cod") paymentMix.cod += 1;
+    else if (method === "card") paymentMix.card += 1;
+    else paymentMix.other += 1;
+  });
+
   res.json({
     revenue,
+    posRevenue,
+    totalRevenue: revenue + posRevenue,
     orders: db.orders.length,
     clients: db.users.filter((user) => user.role === "customer").length,
     lowStock: db.products.filter((product) => product.stock < 3),
     posts: db.posts.length,
+    charts: {
+      revenueSeries: dayKeys.map((date) => ({
+        date,
+        online: onlineByDay[date],
+        pos: posByDay[date],
+        total: onlineByDay[date] + posByDay[date],
+      })),
+      orderStatus: statusOrder.map((status) => ({
+        key: status,
+        label: status,
+        value: statusCounts[status],
+      })),
+      channelMix: {
+        online: revenue,
+        pos: posRevenue,
+      },
+      paymentMix,
+    },
   });
 });
 
@@ -643,7 +837,7 @@ app.patch("/api/admin/orders/:id", requireAdmin, async (req, res) => {
   res.json({ order });
 });
 
-app.get("/api/admin/users", requireAdmin, async (req, res) => {
+app.get("/api/admin/users", requireSuperAdmin, async (req, res) => {
   res.json({
     users: db.users.map((user) => ({
       id: user.id,
@@ -655,7 +849,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
   });
 });
 
-app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
+app.patch("/api/admin/users/:id", requireSuperAdmin, async (req, res) => {
   const user = db.users.find((entry) => entry.id === req.params.id);
   if (!user) return fail(res, 404, "User not found.");
   const body = req.body || {};
@@ -676,10 +870,19 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
   }
 
   if (body.role !== undefined) {
-    if (!["customer", "admin"].includes(body.role)) return fail(res, 400, "Role must be customer or admin.");
-    if (user.role === "admin" && body.role !== "admin") {
-      const admins = db.users.filter((entry) => entry.role === "admin");
-      if (admins.length <= 1) return fail(res, 400, "Keep at least one admin account.");
+    if (!["customer", "admin", "superadmin"].includes(body.role)) {
+      return fail(res, 400, "Role must be customer, admin, or superadmin.");
+    }
+    if (!roles.isSuperAdmin(req.user) && body.role === "superadmin") {
+      return fail(res, 403, "Only the shop owner can assign superadmin.");
+    }
+    if (roles.isSuperAdmin(user) && body.role !== "superadmin") {
+      const owners = db.users.filter((entry) => entry.role === "superadmin");
+      if (owners.length <= 1) return fail(res, 400, "Keep at least one shop owner (superadmin) account.");
+    }
+    if (user.role === "admin" && body.role === "customer") {
+      const staff = db.users.filter((entry) => roles.isStaff(entry));
+      if (staff.length <= 1) return fail(res, 400, "Keep at least one admin or shop owner account.");
     }
     user.role = body.role;
   }
@@ -823,6 +1026,7 @@ const uploadsDir = path.join(__dirname, "..", "uploads");
 fs.mkdirSync(path.join(uploadsDir, "inventory"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "labels"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "home"), { recursive: true });
+fs.mkdirSync(path.join(uploadsDir, "offers"), { recursive: true });
 app.use(
   "/uploads",
   express.static(uploadsDir, {
@@ -878,7 +1082,7 @@ app.get("/api/inventory/categories", requireAdmin, async (req, res) => {
   });
 });
 
-app.post("/api/inventory/categories", requireAdmin, handle(async (req, res) => {
+app.post("/api/inventory/categories", requireSuperAdmin, handle(async (req, res) => {
   const category = inventory.addCategory(db, req.body && req.body.name, req.body && req.body.audiences);
   await store.save();
   res.status(201).json({
@@ -889,7 +1093,7 @@ app.post("/api/inventory/categories", requireAdmin, handle(async (req, res) => {
   });
 }));
 
-app.patch("/api/inventory/categories", requireAdmin, handle(async (req, res) => {
+app.patch("/api/inventory/categories", requireSuperAdmin, handle(async (req, res) => {
   const category = inventory.renameCategory(
     db,
     req.body && req.body.from,
@@ -905,7 +1109,7 @@ app.patch("/api/inventory/categories", requireAdmin, handle(async (req, res) => 
   });
 }));
 
-app.delete("/api/inventory/categories", requireAdmin, handle(async (req, res) => {
+app.delete("/api/inventory/categories", requireSuperAdmin, handle(async (req, res) => {
   const category = inventory.removeCategory(db, req.body && req.body.name);
   await store.save();
   res.json({
@@ -1174,8 +1378,22 @@ app.use("/api", async (req, res) => {
 if (process.env.NODE_ENV === "production") {
   const pub = path.join(__dirname, "..", "public");
   app.use(express.static(pub));
-  app.get("*", async (req, res) => {
-    res.sendFile(path.join(pub, "index.html"));
+  app.get("*", (req, res) => {
+    const indexPath = path.join(pub, "index.html");
+    if (!fs.existsSync(indexPath)) {
+      return res
+        .status(503)
+        .type("html")
+        .send("<!doctype html><title>StyleARZ</title><p>Frontend build missing. Redeploy <code>server/public</code>.</p>");
+    }
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error(err);
+        if (!res.headersSent) {
+          res.status(500).type("html").send("<!doctype html><title>StyleARZ</title><p>Could not load the site shell.</p>");
+        }
+      }
+    });
   });
 }
 
@@ -1188,6 +1406,10 @@ app.use((err, req, res, next) => {
 
 async function start() {
   db = await store.load();
+  if (roles.ensureSuperAdmin(db)) {
+    await store.save();
+    console.log("Promoted an admin account to superadmin (shop owner).");
+  }
   const port = Number(process.env.PORT) || 4000;
   const host = process.env.HOST || "0.0.0.0";
   app.listen(port, host, () => {
