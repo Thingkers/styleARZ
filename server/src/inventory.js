@@ -87,7 +87,7 @@ function httpError(status, message, extra) {
 // Adds retail/POS collections to older databases. Returns true when something changed.
 function ensureCollections(db) {
   let changed = false;
-  ["inventoryItems", "posSessions", "posScanEvents", "posSales", "posSalesDeleted", "inventoryDeleted"].forEach((key) => {
+  ["inventoryItems", "posSessions", "posScanEvents", "posSales", "posSalesDeleted", "inventoryDeleted", "offerCampaigns", "offerCustomers"].forEach((key) => {
     if (!Array.isArray(db[key])) {
       db[key] = [];
       changed = true;
@@ -579,7 +579,7 @@ function saveImageFromBase64(uploadsDir, itemId, dataUrl, folder = "inventory") 
 
   const safeId = String(itemId).replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeId) throw httpError(400, "Invalid item.");
-  const safeFolder = folder === "home" ? "home" : "inventory";
+  const safeFolder = folder === "home" ? "home" : folder === "offers" ? "offers" : "inventory";
   const dir = path.join(uploadsDir, safeFolder);
   fs.mkdirSync(dir, { recursive: true });
   const name = `${safeId}-${Date.now().toString(36)}.${ext}`;

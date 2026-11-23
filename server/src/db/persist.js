@@ -45,6 +45,8 @@ async function loadAll(connection) {
     posScanEvents: [],
     posSales: [],
     posSalesDeleted: [],
+    offerCampaigns: [],
+    offerCustomers: [],
     settings: { smsSenderPhone: "" },
     orders: [],
     wardrobe: [],
@@ -88,6 +90,8 @@ async function loadAll(connection) {
   await loadDocs("pos_scan_events", "posScanEvents");
   await loadDocs("pos_sales", "posSales");
   await loadDocs("pos_sales_deleted", "posSalesDeleted");
+  await loadDocs("offer_campaigns", "offerCampaigns");
+  await loadDocs("offer_customers", "offerCustomers");
   await loadDocs("orders", "orders");
   await loadDocs("wardrobe", "wardrobe");
   await loadDocs("outfits", "outfits");
@@ -232,6 +236,23 @@ async function saveAll(db) {
       client_sale_id: entry.clientId || null,
       deleted_at: entry.deletedAt || null,
       doc: asJson(entry),
+    }));
+
+    await replaceCollection(connection, "offer_campaigns", db.offerCampaigns || [], (campaign) => ({
+      id: campaign.id,
+      name: campaign.name || "",
+      active: campaign.active ? 1 : 0,
+      claimed_count: Number(campaign.claimedCount) || 0,
+      doc: asJson(campaign),
+    }));
+
+    await replaceCollection(connection, "offer_customers", db.offerCustomers || [], (entry) => ({
+      id: entry.id,
+      phone: entry.phone || "",
+      campaign_id: entry.campaignId || "",
+      slot: Number(entry.slot) || 0,
+      doc: asJson(entry),
+      created_at: entry.createdAt || null,
     }));
 
     await replaceCollection(connection, "looks", db.looks || [], (look) => ({

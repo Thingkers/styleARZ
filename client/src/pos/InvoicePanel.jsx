@@ -208,7 +208,7 @@ export default function InvoicePanel({
           </p>
           {Number(sale.discount) > 0 && (
             <p>
-              <span>Discount</span>
+              <span>Discount{sale.offerPercent ? ` (${sale.offerPercent}%)` : ""}</span>
               <strong>−{money(sale.discount)}</strong>
             </p>
           )}
@@ -218,6 +218,16 @@ export default function InvoicePanel({
           </p>
         </div>
 
+        {sale.offerKind === "inaugural" && (
+          <p className="pos-invoice-note">
+            Grand opening guest #{sale.offerSlot} — {sale.offerPercent}% today
+            {sale.lifetimePercent ? ` + lifetime ${sale.lifetimePercent}%` : ""}.
+          </p>
+        )}
+        {sale.offerKind === "lifetime" && (
+          <p className="pos-invoice-note">Lifetime inauguration discount {sale.lifetimePercent || sale.offerPercent}%.</p>
+        )}
+        {sale.giftEligible && <p className="pos-invoice-note">Special gift eligible (৳{sale.giftMinSubtotal || 5000}+).</p>}
         {sale.note && <p className="pos-invoice-note">Note: {sale.note}</p>}
         <p className="pos-invoice-thanks">Thank you for shopping with StyleARZ.</p>
       </article>

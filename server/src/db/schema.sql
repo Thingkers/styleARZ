@@ -195,3 +195,25 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_notifications_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS offer_campaigns (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  claimed_count INT NOT NULL DEFAULT 0,
+  doc JSON NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS offer_customers (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  phone VARCHAR(32) NOT NULL,
+  campaign_id VARCHAR(64) NOT NULL,
+  slot INT NOT NULL DEFAULT 0,
+  doc JSON NOT NULL,
+  created_at VARCHAR(40) NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_offer_customers_phone_campaign (phone, campaign_id),
+  KEY idx_offer_customers_campaign (campaign_id),
+  KEY idx_offer_customers_slot (slot)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

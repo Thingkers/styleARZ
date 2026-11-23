@@ -632,7 +632,9 @@ export default function Pos() {
   const [tab, setTab] = useState("scan");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [discount, setDiscount] = useState("");
+  const [discountManual, setDiscountManual] = useState(false);
   const [customerPhone, setCustomerPhone] = useState("");
+  const [offerPreview, setOfferPreview] = useState(null);
   const [lastSale, setLastSale] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [busy, setBusy] = useState(false);
@@ -658,6 +660,31 @@ export default function Pos() {
   const discountNumber = Math.max(0, Number(discount) || 0);
   const total = Math.max(0, subtotal - discountNumber);
   const hasStockBlocks = blockedCart.length > 0;
+
+  useEffect(() => {
+    if (!online) {
+      setOfferPreview(null);
+      return undefined;
+    }
+    const phone = customerPhone.trim();
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams();
+      if (phone) query.set("phone", phone);
+      query.set("subtotal", String(subtotal));
+      api(`/api/pos/offers/preview?${query.toString()}`)
+        .then((data) => {
+          const offer = data.offer || null;
+          setOfferPreview(offer);
+          if (!discountManual && offer?.eligible && Number(offer.discountAmount) > 0) {
+            setDiscount(String(offer.discountAmount));
+          } else if (!discountManual && (!offer || !offer.eligible)) {
+            setDiscount("");
+          }
+        })
+        .catch(() => setOfferPreview(null));
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [customerPhone, subtotal, online, discountManual]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -1003,7 +1030,9 @@ export default function Pos() {
       });
       setCart([]);
       setDiscount("");
+      setDiscountManual(false);
       setCustomerPhone("");
+      setOfferPreview(null);
       setTab("scan");
       setLastSale(offlineSale);
       setNotice("Sale saved offline · will sync. You can still print this invoice.");
@@ -1027,11 +1056,20 @@ export default function Pos() {
       });
       setCart([]);
       setDiscount("");
+      setDiscountManual(false);
       setCustomerPhone("");
+      setOfferPreview(null);
       setSession(null);
       setTab("scan");
       setLastSale(result.sale);
-      setNotice(`Sale complete · ${result.sale.receiptNo}`);
+      const giftNote = result.sale.giftEligible ? " · hand over special gift" : "";
+      const offerNote =
+        result.sale.offerKind === "inaugural"
+          ? ` · inauguration #${result.sale.offerSlot} (${result.sale.offerPercent}%)`
+          : result.sale.offerKind === "lifetime"
+            ? ` · lifetime ${result.sale.lifetimePercent}%`
+            : "";
+      setNotice(`Sale complete · ${result.sale.receiptNo}${offerNote}${giftNote}`);
     } catch (requestError) {
       if (isNetworkError(requestError)) {
         // Connection dropped mid-request; the same clientId lets the server dedupe if it did go through.
@@ -1084,11 +1122,7 @@ export default function Pos() {
         </select>
       </label>
       <label>
-        Discount
-        <input type="number" min="0" max={subtotal} value={discount} onChange={(event) => setDiscount(event.target.value)} />
-      </label>
-      <label>
-        Customer phone (for SMS invoice)
+        Customer phone (for SMS + offers)
         <input
           value={customerPhone}
           onChange={(event) => setCustomerPhone(event.target.value)}
@@ -1097,6 +1131,41 @@ export default function Pos() {
           autoComplete="tel"
         />
       </label>
+      {offerPreview?.message ? (
+        <p className={`pos-offer-banner ${offerPreview.eligible ? "is-eligible" : ""}`} role="status">
+          {offerPreview.message}
+        </p>
+      ) : null}
+      {offerPreview?.giftEligible ? (
+        <p className="pos-gift-alert" role="status">
+          Special gift — hand over gift (৳{offerPreview.giftMinSubtotal || 5000}+)
+        </p>
+      ) : null}
+      <label>
+        Discount
+        <input
+          type="number"
+          min="0"
+          max={subtotal}
+          value={discount}
+          onChange={(event) => {
+            setDiscountManual(true);
+            setDiscount(event.target.value);
+          }}
+        />
+      </label>
+      {discountManual && offerPreview?.eligible ? (
+        <button
+          className="text-link"
+          type="button"
+          onClick={() => {
+            setDiscountManual(false);
+            setDiscount(String(offerPreview.discountAmount || ""));
+          }}
+        >
+          Reset to offer discount ({money(offerPreview.discountAmount || 0)})
+        </button>
+      ) : null}
       <div className="pos-totals">
         <p><span>Subtotal</span><strong>{money(subtotal)}</strong></p>
         <p><span>Discount</span><strong>−{money(discountNumber)}</strong></p>

@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { ensureCollections, findByBarcode, findById, httpError } = require("./inventory");
+const { commitOfferOnSale, resolveSaleDiscount } = require("./offers");
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const EVENT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -291,11 +292,17 @@ function finalizeSale(db, input = {}, user) {
   const problems = stockProblems(db, lines);
   if (problems.length) throw httpError(409, "Not enough stock for this sale.", { problems });
 
-  const totals = pricing(lines, input.discount);
-  const now = nowIso();
-  applyStock(db, lines, now, false);
   const customerPhone = normalizeCustomerPhone(input.customerPhone);
   const customerName = String(input.customerName || "").trim().slice(0, 80);
+  const subtotalBefore = round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
+  const resolved = resolveSaleDiscount(db, {
+    phone: customerPhone,
+    subtotal: subtotalBefore,
+    discountInput: input.discount,
+  });
+  const totals = pricing(lines, resolved.discount);
+  const now = nowIso();
+  applyStock(db, lines, now, false);
   const sale = {
     id: randomId("sale"),
     receiptNo: nextReceiptNo(db),
@@ -307,11 +314,13 @@ function finalizeSale(db, input = {}, user) {
     note: String(input.note || "").trim().slice(0, 300),
     customerPhone,
     customerName,
+    discountSource: resolved.discountSource,
     cashierId: user ? user.id : null,
     source: "online",
     createdAt: now,
     syncedAt: now,
   };
+  commitOfferOnSale(db, sale);
   db.posSales.unshift(sale);
   if (session) closeSession(db, session.id, "sold");
   return { sale, duplicate: false };
@@ -456,9 +465,16 @@ function syncSales(db, sales, user, options = {}) {
       return;
     }
 
+    const customerPhone = normalizeCustomerPhone(incoming.customerPhone);
+    const subtotalBefore = round2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
+    const resolved = resolveSaleDiscount(db, {
+      phone: customerPhone,
+      subtotal: subtotalBefore,
+      discountInput: incoming.discount,
+    });
     let totals;
     try {
-      totals = pricing(lines, incoming.discount);
+      totals = pricing(lines, resolved.discount);
     } catch (error) {
       conflicts.push({ clientId, reason: "invalid_discount", details: [{ reason: "invalid_discount" }] });
       return;
@@ -483,13 +499,15 @@ function syncSales(db, sales, user, options = {}) {
       ...totals,
       paymentMethod: method,
       note: String(incoming.note || "").trim().slice(0, 300),
-      customerPhone: normalizeCustomerPhone(incoming.customerPhone),
+      customerPhone,
       customerName: String(incoming.customerName || "").trim().slice(0, 80),
+      discountSource: resolved.discountSource,
       cashierId: user ? user.id : null,
       source: "offline",
       createdAt: Number.isNaN(soldAt) || soldAt > Date.now() ? now : new Date(soldAt).toISOString(),
       syncedAt: now,
     };
+    commitOfferOnSale(db, sale);
     if (details.length) sale.forced = details;
     db.posSales.unshift(sale);
     accepted.push({ clientId, saleId: sale.id, receiptNo: sale.receiptNo, duplicate: false, warnings });

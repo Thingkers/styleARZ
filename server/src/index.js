@@ -12,6 +12,7 @@ const home = require("./home");
 const pos = require("./pos");
 const sms = require("./sms");
 const barcode = require("./barcode");
+const offers = require("./offers");
 const { productMatchesCategory, categoriesMatch } = require("./categoryMatch");
 
 function loadEnv() {
@@ -615,6 +616,114 @@ app.put("/api/admin/settings", requireAdmin, handle(async (req, res) => {
   res.json({ settings: db.settings });
 }));
 
+app.get("/api/offers", handle(async (_req, res) => {
+  res.json({
+    offers: offers.listPublicOffers(db),
+    slides: offers.listHeroSlides(db),
+    deck: offers.listHeroCards(db),
+  });
+}));
+
+app.get("/api/pos/offers/preview", requireAdmin, handle(async (req, res) => {
+  const preview = offers.previewOffer(db, {
+    phone: req.query.phone,
+    subtotal: req.query.subtotal,
+  });
+  res.json({ offer: preview });
+}));
+
+app.get("/api/admin/offers/templates", requireAdmin, handle(async (_req, res) => {
+  res.json({ templates: offers.listTemplates() });
+}));
+
+app.post("/api/admin/offers/templates/:id/apply", requireAdmin, handle(async (req, res) => {
+  const campaign = offers.applyTemplate(db, req.params.id, {
+    resetClaims: Boolean(req.body && req.body.resetClaims),
+    asNew: Boolean(req.body && req.body.asNew),
+  });
+  await store.save();
+  res.json({
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+  });
+}));
+
+app.post("/api/admin/offers/campaign", requireAdmin, handle(async (req, res) => {
+  const campaign = offers.createCampaign(db, req.body || {});
+  await store.save();
+  res.status(201).json({
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+  });
+}));
+
+app.get("/api/admin/offers/campaign", requireAdmin, handle(async (req, res) => {
+  const id = String(req.query.id || offers.GRAND_OPENING_ID);
+  const campaign = offers.getCampaign(db, id);
+  if (!campaign) return res.status(404).json({ error: "Offer campaign not found." });
+  res.json({
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+  });
+}));
+
+app.patch("/api/admin/offers/campaign", requireAdmin, handle(async (req, res) => {
+  const body = req.body || {};
+  const id = String(body.id || req.query.id || offers.GRAND_OPENING_ID);
+  const campaign = offers.updateCampaign(db, body, id);
+  await store.save();
+  res.json({
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+  });
+}));
+
+app.post("/api/admin/offers/campaign/:id/image", requireAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
+  const offerUploads = path.join(__dirname, "..", "uploads");
+  fs.mkdirSync(path.join(offerUploads, "offers"), { recursive: true });
+  const campaign = offers.setCampaignImage(db, req.params.id, offerUploads, req.body && req.body.image);
+  await store.save();
+  res.json({
+    campaign,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, campaign.id),
+  });
+}));
+
+app.delete("/api/admin/offers/campaign/:id", requireAdmin, handle(async (req, res) => {
+  const offerUploads = path.join(__dirname, "..", "uploads");
+  offers.deleteCampaign(db, req.params.id, offerUploads);
+  const fallback = offers.getCampaign(db, offers.GRAND_OPENING_ID);
+  await store.save();
+  res.json({
+    ok: true,
+    campaign: fallback,
+    campaigns: offers.listCampaigns(db),
+    templates: offers.listTemplates(),
+    activeNow: Boolean(offers.getActiveCampaign(db)),
+    customers: offers.listOfferCustomers(db, fallback.id),
+  });
+}));
+
+app.get("/api/admin/offers/customers", requireAdmin, handle(async (req, res) => {
+  const campaignId = String(req.query.campaignId || offers.GRAND_OPENING_ID);
+  res.json({ customers: offers.listOfferCustomers(db, campaignId) });
+}));
+
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
   const revenue = db.orders
     .filter((order) => order.status !== "cancelled")
@@ -823,6 +932,7 @@ const uploadsDir = path.join(__dirname, "..", "uploads");
 fs.mkdirSync(path.join(uploadsDir, "inventory"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "labels"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "home"), { recursive: true });
+fs.mkdirSync(path.join(uploadsDir, "offers"), { recursive: true });
 app.use(
   "/uploads",
   express.static(uploadsDir, {
@@ -1174,8 +1284,22 @@ app.use("/api", async (req, res) => {
 if (process.env.NODE_ENV === "production") {
   const pub = path.join(__dirname, "..", "public");
   app.use(express.static(pub));
-  app.get("*", async (req, res) => {
-    res.sendFile(path.join(pub, "index.html"));
+  app.get("*", (req, res) => {
+    const indexPath = path.join(pub, "index.html");
+    if (!fs.existsSync(indexPath)) {
+      return res
+        .status(503)
+        .type("html")
+        .send("<!doctype html><title>StyleARZ</title><p>Frontend build missing. Redeploy <code>server/public</code>.</p>");
+    }
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error(err);
+        if (!res.headersSent) {
+          res.status(500).type("html").send("<!doctype html><title>StyleARZ</title><p>Could not load the site shell.</p>");
+        }
+      }
+    });
   });
 }
 

@@ -5,6 +5,7 @@ const { buildSeed, ensureIconCategoryProducts, ensureFakeCatalogMovedToHome } = 
 const { ensureCollections, ensureSortOrders } = require("./inventory");
 const { ensureLabelDrafts } = require("./labels");
 const { ensureHomeCollections } = require("./home");
+const { ensureGrandOpeningCampaign } = require("./offers");
 
 let db;
 let saving = Promise.resolve();
@@ -22,6 +23,7 @@ function prepareSeed() {
   ensureIconCategoryProducts(next);
   ensureFakeCatalogMovedToHome(next);
   ensureLabelDrafts(next);
+  ensureGrandOpeningCampaign(next);
   return next;
 }
 
@@ -41,6 +43,7 @@ async function load() {
       if (ensureIconCategoryProducts(db)) dirty = true;
       if (ensureFakeCatalogMovedToHome(db)) dirty = true;
       if (ensureLabelDrafts(db)) dirty = true;
+      if (ensureGrandOpeningCampaign(db)) dirty = true;
       if (!dirty) return db;
     }
   } finally {

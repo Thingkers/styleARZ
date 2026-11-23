@@ -14,6 +14,7 @@ import Labels from "./admin/Labels";
 import PosSales from "./admin/PosSales";
 import Settings from "./admin/Settings";
 import UsbScanner from "./admin/UsbScanner";
+import Offers from "./admin/Offers";
 import { LOW_STOCK, stockLevel, stockText, variantText } from "./admin/inventoryUtils";
 
 function AdminShell() {
@@ -43,6 +44,7 @@ function AdminShell() {
         <NavLink to="/admin/categories">Categories</NavLink>
         <NavLink to="/admin/barcodes">Barcodes</NavLink>
         <NavLink to="/admin/usb-scanner">USB scanner</NavLink>
+        <NavLink to="/admin/offers">Offers</NavLink>
         <NavLink to="/admin/pos-sales">POS sales</NavLink>
         <NavLink to="/admin/products">Products</NavLink>
         <NavLink to="/admin/settings">Settings</NavLink>
@@ -62,6 +64,7 @@ function AdminShell() {
         <Route path="categories" element={<Categories />} />
         <Route path="barcodes" element={<Barcodes />} />
         <Route path="usb-scanner" element={<UsbScanner />} />
+        <Route path="offers" element={<Offers />} />
         <Route path="pos-sales" element={<PosSales />} />
         <Route path="products" element={<Products />} />
         <Route path="settings" element={<Settings />} />

@@ -5,6 +5,9 @@ import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
 import { Loading } from "../components/ui";
 import { FEATURED_CATEGORIES } from "../components/CategoryIcons";
+import HeroOfferSlides from "../components/HeroOfferSlides";
+import HeroWinterStrip from "../components/HeroWinterStrip";
+import { WINTER_COLLECTION } from "../home/features";
 
 export default function Home() {
   useDocumentTitle("");
@@ -12,6 +15,7 @@ export default function Home() {
   const [collections, setCollections] = useState([]);
   const [looks, setLooks] = useState([]);
   const [posts, setPosts] = useState([]);
+  const [deck, setDeck] = useState(null);
   const [quiz, setQuiz] = useState(null);
   const [error, setError] = useState("");
 
@@ -29,19 +33,23 @@ export default function Home() {
       api("/api/home-collections"),
       api("/api/looks"),
       api("/api/community"),
+      api("/api/offers").catch(() => ({ deck: null })),
     ])
-      .then(([productData, collectionData, lookData, postData]) => {
+      .then(([productData, collectionData, lookData, postData, offerData]) => {
         setProducts(productData.products);
         setCollections(collectionData.collections || []);
         setLooks(lookData.looks);
         setPosts(postData.posts.slice(0, 3));
+        setDeck(offerData.deck && Array.isArray(offerData.deck.cards) && offerData.deck.cards.length ? offerData.deck : null);
       })
       .catch((err) => setError(err.message));
   }, []);
 
+  const hasOfferDeck = Boolean(deck?.cards?.length);
+
   return (
     <div className="home">
-      <section className="hero">
+      <section className={`hero ${hasOfferDeck ? "has-offers" : ""} hero-has-winter`}>
         <div className="hero-media" aria-hidden="true" />
         <aside className="hero-rail" aria-label="Shop by category">
           <ul className="rail-icons">
@@ -57,7 +65,7 @@ export default function Home() {
             ))}
           </ul>
         </aside>
-        <div className="hero-layout">
+        <div className={`hero-layout ${hasOfferDeck ? "hero-layout-offers" : ""}`}>
           <div className="hero-copy">
             <div className="hero-brand">
               <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
@@ -66,19 +74,27 @@ export default function Home() {
               </span>
               <p className="hero-tag">your personal fashion statement</p>
             </div>
-            <h1>Export casuals, made for how Bangladesh dresses.</h1>
-            <p className="hero-lede">
-              Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
-              specs, priced for everyday.
-            </p>
-            <div className="hero-actions">
-              <Link className="btn solid" to="/shop">
-                Shop casuals
-              </Link>
-              <Link className="btn line light" to="/quiz">
-                Take the style quiz
-              </Link>
-            </div>
+            {!hasOfferDeck && (
+              <>
+                <h1>Export casuals, made for how Bangladesh dresses.</h1>
+                <p className="hero-lede">
+                  Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
+                  specs, priced for everyday.
+                </p>
+                <div className="hero-actions">
+                  <Link className="btn solid" to="/shop">
+                    Shop casuals
+                  </Link>
+                  <Link className="btn line light" to="/quiz">
+                    Take the style quiz
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+          <div className={`hero-split ${hasOfferDeck ? "hero-split-offers" : ""}`}>
+            {hasOfferDeck ? <HeroOfferSlides deck={deck} /> : null}
+            <HeroWinterStrip />
           </div>
         </div>
       </section>
@@ -89,6 +105,28 @@ export default function Home() {
         <li>Men · Women · Children</li>
         <li>Free shipping over ৳8,000</li>
       </ul>
+
+      <section className="wrap winter-collection reveal" aria-label="Winter collection">
+        <div className="section-head">
+          <div>
+            <p className="kicker">Winter collection</p>
+            <h2>Knits and layers for the season ahead</h2>
+          </div>
+          <Link to="/shop?category=Knitwear">Shop winter</Link>
+        </div>
+        <div className="winter-grid">
+          {WINTER_COLLECTION.map((item) => (
+            <Link
+              key={item.src}
+              to={`/shop?category=${encodeURIComponent(item.key)}`}
+              className="winter-tile"
+            >
+              <img src={item.src} alt="" loading="lazy" decoding="async" />
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section className="wrap collections">
         {collections.map((entry) => (
