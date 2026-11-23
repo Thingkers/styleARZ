@@ -133,7 +133,7 @@ export default function Layout({ children }) {
                     {link.label}
                   </NavLink>
                 ))}
-                {user?.role === "admin" && <NavLink to="/admin">Atelier</NavLink>}
+                {(user?.role === "admin" || user?.role === "superadmin") && <NavLink to="/admin">Atelier</NavLink>}
                 <form
                   className={`nav-search ${searchOpen ? "is-open" : ""}`}
                   onSubmit={onSearch}
@@ -195,7 +195,7 @@ export default function Layout({ children }) {
                       <Link role="menuitem" to="/profile" onClick={() => setAccountOpen(false)}>
                         Profile
                       </Link>
-                      {user.role === "admin" && (
+                      {(user.role === "admin" || user.role === "superadmin") && (
                         <Link role="menuitem" to="/admin" onClick={() => setAccountOpen(false)}>
                           Admin
                         </Link>

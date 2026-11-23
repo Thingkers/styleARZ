@@ -22,6 +22,8 @@ export default function Offers() {
   const [campaigns, setCampaigns] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [customerSummary, setCustomerSummary] = useState(null);
+  const [customerQuery, setCustomerQuery] = useState("");
   const [activeNow, setActiveNow] = useState(false);
   const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +57,7 @@ export default function Offers() {
     setCampaigns(Array.isArray(data.campaigns) ? data.campaigns : []);
     setTemplates(Array.isArray(data.templates) ? data.templates : []);
     setCustomers(Array.isArray(data.customers) ? data.customers : []);
+    setCustomerSummary(data.customerSummary || data.summary || null);
     setActiveNow(Boolean(data.activeNow));
     syncForm(next);
   }
@@ -408,33 +411,74 @@ export default function Offers() {
       {campaign.id === "offer_grand_opening" && (
         <section className="admin-offers-card">
           <h3>Claimed inauguration guests</h3>
+          <p className="muted">
+            Unique phones claim one slot on first checkout. Returning guests keep the same slot and get lifetime %.
+          </p>
+          {customerSummary ? (
+            <div className="admin-offer-bands" aria-label="Inauguration slot progress">
+              <div className="admin-offer-band is-total">
+                <strong>
+                  {customerSummary.claimed}/{customerSummary.max}
+                </strong>
+                <span>claimed · {customerSummary.remaining} left</span>
+              </div>
+              {(customerSummary.bands || []).map((band) => (
+                <div key={band.label} className="admin-offer-band">
+                  <strong>{band.label}</strong>
+                  <span>
+                    {band.count}/{band.capacity} · {band.salePercent}% today
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {!customers.length ? (
             <p className="muted">No phones have claimed a slot yet.</p>
           ) : (
-            <div className="admin-offers-table-wrap">
-              <table className="admin-offers-table">
-                <thead>
-                  <tr>
-                    <th>Slot</th>
-                    <th>Phone</th>
-                    <th>Today %</th>
-                    <th>Lifetime %</th>
-                    <th>First sale</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {customers.map((entry) => (
-                    <tr key={entry.id}>
-                      <td>#{entry.slot}</td>
-                      <td>{entry.phone}</td>
-                      <td>{entry.inauguralPercent}%</td>
-                      <td>{entry.lifetimePercent}%</td>
-                      <td>{entry.createdAt ? prettyDateTime(entry.createdAt) : "—"}</td>
+            <>
+              <label className="admin-offer-customer-search">
+                Find phone
+                <input
+                  value={customerQuery}
+                  onChange={(event) => setCustomerQuery(event.target.value)}
+                  placeholder="01XXXXXXXXX"
+                  inputMode="tel"
+                  autoComplete="tel"
+                />
+              </label>
+              <div className="admin-offers-table-wrap">
+                <table className="admin-offers-table">
+                  <thead>
+                    <tr>
+                      <th>Slot</th>
+                      <th>Tier</th>
+                      <th>Phone</th>
+                      <th>Today %</th>
+                      <th>Lifetime %</th>
+                      <th>First sale</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {customers
+                      .filter((entry) => {
+                        const q = customerQuery.replace(/\D/g, "");
+                        if (!q) return true;
+                        return String(entry.phone || "").replace(/\D/g, "").includes(q);
+                      })
+                      .map((entry) => (
+                        <tr key={entry.id}>
+                          <td>#{entry.slot}</td>
+                          <td>{entry.tierLabel || "—"}</td>
+                          <td>{entry.phone}</td>
+                          <td>{entry.inauguralPercent}%</td>
+                          <td>{entry.lifetimePercent}%</td>
+                          <td>{entry.createdAt ? prettyDateTime(entry.createdAt) : "—"}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}

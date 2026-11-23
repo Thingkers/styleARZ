@@ -632,6 +632,7 @@ export default function Pos() {
   const [tab, setTab] = useState("scan");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [discount, setDiscount] = useState("");
+  const [discountMode, setDiscountMode] = useState("amount"); // amount | percent
   const [discountManual, setDiscountManual] = useState(false);
   const [customerPhone, setCustomerPhone] = useState("");
   const [offerPreview, setOfferPreview] = useState(null);
@@ -657,9 +658,28 @@ export default function Pos() {
   const { ready: sellableCart, blocked: blockedCart } = splitCart(cart);
   const cartCount = sellableCart.reduce((sum, line) => sum + line.qty, 0);
   const subtotal = sellableCart.reduce((sum, line) => sum + line.price * line.qty, 0);
-  const discountNumber = Math.max(0, Number(discount) || 0);
+  const discountInputNumber = Math.max(0, Number(discount) || 0);
+  const discountNumber =
+    discountMode === "percent"
+      ? Math.min(subtotal, Math.round(((subtotal * Math.min(100, discountInputNumber)) / 100) * 100) / 100)
+      : discountInputNumber;
+  const discountPercentValue = discountMode === "percent" ? Math.min(100, discountInputNumber) : null;
   const total = Math.max(0, subtotal - discountNumber);
   const hasStockBlocks = blockedCart.length > 0;
+
+  function applyOfferDiscount(offer) {
+    const percent = Number(offer?.salePercent);
+    if (Number.isFinite(percent) && percent > 0) {
+      setDiscountMode("percent");
+      setDiscount(String(percent));
+      return;
+    }
+    const amount = Number(offer?.discountAmount);
+    if (Number.isFinite(amount) && amount > 0) {
+      setDiscountMode("amount");
+      setDiscount(String(amount));
+    }
+  }
 
   useEffect(() => {
     if (!online) {
@@ -675,8 +695,8 @@ export default function Pos() {
         .then((data) => {
           const offer = data.offer || null;
           setOfferPreview(offer);
-          if (!discountManual && offer?.eligible && Number(offer.discountAmount) > 0) {
-            setDiscount(String(offer.discountAmount));
+          if (!discountManual && offer?.eligible && (Number(offer.salePercent) > 0 || Number(offer.discountAmount) > 0)) {
+            applyOfferDiscount(offer);
           } else if (!discountManual && (!offer || !offer.eligible)) {
             setDiscount("");
           }
@@ -1025,16 +1045,21 @@ export default function Pos() {
         items: saleLines,
         paymentMethod,
         discount: discountNumber,
+        discountPercent: discountPercentValue,
         customerPhone: phone,
         createdAt,
       });
       setCart([]);
       setDiscount("");
+      setDiscountMode("amount");
       setDiscountManual(false);
       setCustomerPhone("");
       setOfferPreview(null);
       setTab("scan");
-      setLastSale(offlineSale);
+      setLastSale({
+        ...offlineSale,
+        discountPercent: discountPercentValue,
+      });
       setNotice("Sale saved offline · will sync. You can still print this invoice.");
     }
 
@@ -1051,11 +1076,13 @@ export default function Pos() {
           paymentMethod,
           clientId,
           discount: discountNumber,
+          discountPercent: discountPercentValue,
           customerPhone: phone,
         },
       });
       setCart([]);
       setDiscount("");
+      setDiscountMode("amount");
       setDiscountManual(false);
       setCustomerPhone("");
       setOfferPreview(null);
@@ -1141,34 +1168,75 @@ export default function Pos() {
           Special gift — hand over gift (৳{offerPreview.giftMinSubtotal || 5000}+)
         </p>
       ) : null}
-      <label>
-        Discount
+      <div className="pos-discount-field">
+        <div className="pos-discount-head">
+          <span>Discount</span>
+          <div className="pos-discount-mode" role="group" aria-label="Discount mode">
+            <button
+              type="button"
+              className={discountMode === "amount" ? "is-active" : ""}
+              onClick={() => {
+                setDiscountManual(true);
+                setDiscountMode("amount");
+                setDiscount(discountNumber ? String(discountNumber) : "");
+              }}
+            >
+              ৳
+            </button>
+            <button
+              type="button"
+              className={discountMode === "percent" ? "is-active" : ""}
+              onClick={() => {
+                setDiscountManual(true);
+                setDiscountMode("percent");
+                const pct =
+                  subtotal > 0 && discountNumber > 0
+                    ? Math.round((discountNumber / subtotal) * 1000) / 10
+                    : discountInputNumber;
+                setDiscount(pct ? String(pct) : "");
+              }}
+            >
+              %
+            </button>
+          </div>
+        </div>
         <input
           type="number"
           min="0"
-          max={subtotal}
+          max={discountMode === "percent" ? 100 : subtotal}
+          step={discountMode === "percent" ? "0.1" : "1"}
           value={discount}
           onChange={(event) => {
             setDiscountManual(true);
             setDiscount(event.target.value);
           }}
+          placeholder={discountMode === "percent" ? "e.g. 15" : "e.g. 500"}
         />
-      </label>
+        {discountMode === "percent" && discountInputNumber > 0 ? (
+          <small className="pos-discount-hint">= {money(discountNumber)} off</small>
+        ) : null}
+      </div>
       {discountManual && offerPreview?.eligible ? (
         <button
           className="text-link"
           type="button"
           onClick={() => {
             setDiscountManual(false);
-            setDiscount(String(offerPreview.discountAmount || ""));
+            applyOfferDiscount(offerPreview);
           }}
         >
-          Reset to offer discount ({money(offerPreview.discountAmount || 0)})
+          Reset to offer discount
+          {offerPreview.salePercent
+            ? ` (${offerPreview.salePercent}% · ${money(offerPreview.discountAmount || 0)})`
+            : ` (${money(offerPreview.discountAmount || 0)})`}
         </button>
       ) : null}
       <div className="pos-totals">
         <p><span>Subtotal</span><strong>{money(subtotal)}</strong></p>
-        <p><span>Discount</span><strong>−{money(discountNumber)}</strong></p>
+        <p>
+          <span>Discount{discountPercentValue != null && discountPercentValue > 0 ? ` (${discountPercentValue}%)` : ""}</span>
+          <strong>−{money(discountNumber)}</strong>
+        </p>
         <p className="pos-total"><span>Total</span><strong>{money(total)}</strong></p>
       </div>
       {discountNumber > subtotal && <p className="error">Discount cannot exceed the subtotal.</p>}

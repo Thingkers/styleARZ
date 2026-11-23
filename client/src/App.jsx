@@ -28,7 +28,7 @@ function RequireAdmin({ children }) {
   const location = useLocation();
   if (!ready) return <Loading />;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
-  if (user.role !== "admin") return <Navigate to="/" replace />;
+  if (user.role !== "admin" && user.role !== "superadmin") return <Navigate to="/" replace />;
   return children;
 }
 

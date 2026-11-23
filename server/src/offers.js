@@ -632,32 +632,49 @@ function previewOffer(db, { phone, subtotal } = {}) {
 
 /**
  * Resolve discount for finalize: prefer offer % unless cashier typed a higher manual discount.
- * Returns { discount, discountSource, offerMeta }.
+ * Accepts either a money `discountInput` and/or `discountPercent` (computes amount from subtotal).
+ * Returns { discount, discountPercent, discountSource, offerPreview }.
  */
-function resolveSaleDiscount(db, { phone, subtotal, discountInput } = {}) {
+function resolveSaleDiscount(db, { phone, subtotal, discountInput, discountPercent } = {}) {
   const preview = previewOffer(db, { phone, subtotal });
   const offerDiscount = preview.eligible ? Number(preview.discountAmount) || 0 : 0;
-  const raw = discountInput === undefined || discountInput === "" ? null : Number(discountInput);
-  const hasManual = raw !== null && Number.isFinite(raw);
+  const offerPercent = preview.eligible ? Number(preview.salePercent) || 0 : 0;
+  const sub = Math.max(0, Number(subtotal) || 0);
 
-  if (hasManual && raw + 0.001 >= offerDiscount) {
+  let percent = null;
+  if (discountPercent !== undefined && discountPercent !== null && discountPercent !== "") {
+    const pct = Number(discountPercent);
+    if (Number.isFinite(pct) && pct >= 0) percent = Math.min(100, pct);
+  }
+
+  let amount = discountInput === undefined || discountInput === "" ? null : Number(discountInput);
+  if ((amount === null || !Number.isFinite(amount)) && percent !== null) {
+    amount = round2((sub * percent) / 100);
+  }
+  const hasManual = amount !== null && Number.isFinite(amount);
+
+  if (hasManual && amount + 0.001 >= offerDiscount) {
+    const fromOffer = offerDiscount > 0 && Math.abs(amount - offerDiscount) < 0.02;
     return {
-      discount: round2(Math.max(0, Math.min(subtotal, raw))),
-      discountSource: offerDiscount > 0 && Math.abs(raw - offerDiscount) < 0.02 ? "offer" : "manual",
+      discount: round2(Math.max(0, Math.min(sub, amount))),
+      discountPercent: fromOffer ? offerPercent || percent : percent,
+      discountSource: fromOffer ? "offer" : "manual",
       offerPreview: preview,
     };
   }
 
   if (offerDiscount > 0) {
     return {
-      discount: round2(Math.min(subtotal, offerDiscount)),
+      discount: round2(Math.min(sub, offerDiscount)),
+      discountPercent: offerPercent || null,
       discountSource: "offer",
       offerPreview: preview,
     };
   }
 
   return {
-    discount: hasManual ? round2(Math.max(0, Math.min(subtotal, raw))) : 0,
+    discount: hasManual ? round2(Math.max(0, Math.min(sub, amount))) : 0,
+    discountPercent: hasManual ? percent : null,
     discountSource: hasManual ? "manual" : "none",
     offerPreview: preview,
   };
@@ -802,9 +819,46 @@ function updateCampaign(db, patch = {}, id = GRAND_OPENING_ID) {
 
 function listOfferCustomers(db, campaignId = GRAND_OPENING_ID) {
   ensureOfferCollections(db);
+  const campaign = getCampaign(db, campaignId);
   return (db.offerCustomers || [])
     .filter((entry) => entry && entry.campaignId === campaignId)
-    .sort((a, b) => (a.slot || 0) - (b.slot || 0));
+    .sort((a, b) => (a.slot || 0) - (b.slot || 0))
+    .map((entry) => {
+      const tier = tierForSlot(campaign, entry.slot);
+      return {
+        ...entry,
+        tierLabel: tier ? `#${tier.from}–${tier.to}` : "",
+        tierFrom: tier ? tier.from : null,
+        tierTo: tier ? tier.to : null,
+      };
+    });
+}
+
+function summarizeOfferCustomers(db, campaignId = GRAND_OPENING_ID) {
+  ensureGrandOpeningCampaign(db);
+  const campaign = getCampaign(db, campaignId);
+  const customers = listOfferCustomers(db, campaignId);
+  const tiers = Array.isArray(campaign?.tiers) && campaign.tiers.length ? campaign.tiers : DEFAULT_TIERS;
+  const bands = tiers.map((tier) => {
+    const from = Number(tier.from) || 0;
+    const to = Number(tier.to) || 0;
+    const count = customers.filter((entry) => entry.slot >= from && entry.slot <= to).length;
+    return {
+      from,
+      to,
+      label: `#${from}–${to}`,
+      salePercent: Number(tier.salePercent) || 0,
+      lifetimePercent: Number(tier.lifetimePercent) || 10,
+      count,
+      capacity: Math.max(0, to - from + 1),
+    };
+  });
+  return {
+    claimed: Number(campaign?.claimedCount) || customers.length,
+    max: Number(campaign?.maxSlots) || 50,
+    remaining: Math.max(0, (Number(campaign?.maxSlots) || 50) - (Number(campaign?.claimedCount) || customers.length)),
+    bands,
+  };
 }
 
 module.exports = {
@@ -831,4 +885,5 @@ module.exports = {
   getCampaign,
   updateCampaign,
   listOfferCustomers,
+  summarizeOfferCustomers,
 };

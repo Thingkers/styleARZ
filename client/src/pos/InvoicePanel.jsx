@@ -208,7 +208,14 @@ export default function InvoicePanel({
           </p>
           {Number(sale.discount) > 0 && (
             <p>
-              <span>Discount{sale.offerPercent ? ` (${sale.offerPercent}%)` : ""}</span>
+              <span>
+                Discount
+                {Number(sale.discountPercent) > 0
+                  ? ` (${sale.discountPercent}%)`
+                  : sale.offerPercent
+                    ? ` (${sale.offerPercent}%)`
+                    : ""}
+              </span>
               <strong>−{money(sale.discount)}</strong>
             </p>
           )}

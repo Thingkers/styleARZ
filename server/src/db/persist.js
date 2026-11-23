@@ -47,6 +47,7 @@ async function loadAll(connection) {
     posSalesDeleted: [],
     offerCampaigns: [],
     offerCustomers: [],
+    smsBroadcasts: [],
     settings: { smsSenderPhone: "" },
     orders: [],
     wardrobe: [],
@@ -67,6 +68,9 @@ async function loadAll(connection) {
       }
     }
     if (row.meta_key === "inventorySeq") db.inventorySeq = Number(value) || 1000;
+    if (row.meta_key === "smsBroadcasts" && Array.isArray(value)) {
+      db.smsBroadcasts = value;
+    }
     if (row.meta_key === "settings" && value && typeof value === "object") {
       db.settings = {
         smsSenderPhone: String(value.smsSenderPhone || "").trim(),
@@ -135,6 +139,12 @@ async function saveAll(db) {
       `INSERT INTO app_meta (meta_key, meta_value) VALUES ('settings', :value)
        ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)`,
       { value: JSON.stringify(settings) }
+    );
+
+    await connection.execute(
+      `INSERT INTO app_meta (meta_key, meta_value) VALUES ('smsBroadcasts', :value)
+       ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)`,
+      { value: JSON.stringify(Array.isArray(db.smsBroadcasts) ? db.smsBroadcasts.slice(0, 100) : []) }
     );
 
     await replaceCollection(connection, "users", db.users || [], (user) => ({

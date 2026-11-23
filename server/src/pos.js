@@ -299,6 +299,7 @@ function finalizeSale(db, input = {}, user) {
     phone: customerPhone,
     subtotal: subtotalBefore,
     discountInput: input.discount,
+    discountPercent: input.discountPercent,
   });
   const totals = pricing(lines, resolved.discount);
   const now = nowIso();
@@ -314,6 +315,7 @@ function finalizeSale(db, input = {}, user) {
     note: String(input.note || "").trim().slice(0, 300),
     customerPhone,
     customerName,
+    discountPercent: resolved.discountPercent == null ? null : Number(resolved.discountPercent),
     discountSource: resolved.discountSource,
     cashierId: user ? user.id : null,
     source: "online",
@@ -471,6 +473,7 @@ function syncSales(db, sales, user, options = {}) {
       phone: customerPhone,
       subtotal: subtotalBefore,
       discountInput: incoming.discount,
+      discountPercent: incoming.discountPercent,
     });
     let totals;
     try {
@@ -501,6 +504,7 @@ function syncSales(db, sales, user, options = {}) {
       note: String(incoming.note || "").trim().slice(0, 300),
       customerPhone,
       customerName: String(incoming.customerName || "").trim().slice(0, 80),
+      discountPercent: resolved.discountPercent == null ? null : Number(resolved.discountPercent),
       discountSource: resolved.discountSource,
       cashierId: user ? user.id : null,
       source: "offline",
