@@ -8,7 +8,7 @@ Use with images in `out/`. Hashtags optional; Bengali variants included where us
 
 **EN**
 
-STYLEARZ grand opening — 27 November, Radhanagar, Pabna.
+STYLEARZ grand opening — 28 November, Radhanagar, Pabna.
 
 your personal fashion statement  
 Bangladesh Grade A export casuals for everyday wear.

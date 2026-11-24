@@ -102,7 +102,7 @@ def make_cover() -> Path:
     head = font(FONT_BOLD, 44)
     draw.text((74, 420), "GRAND OPENING", fill=ORANGE, font=head)
     sub = font(FONT_REG, 26)
-    draw.text((74, 480), "Inauguration 27 November · Pabna", fill=WHITE, font=sub)
+    draw.text((74, 480), "Inauguration 28 November · Pabna", fill=WHITE, font=sub)
     draw.text((74, 520), "Grade A export casuals · Men · Women · Kids", fill=(200, 200, 198), font=sub)
 
     # CTA chip
@@ -282,7 +282,7 @@ def make_story() -> Path:
     head = font(FONT_BOLD, 64)
     draw.text((80, 720), "GRAND\nOPENING", fill=ORANGE, font=head)
     sub = font(FONT_REG, 32)
-    draw.text((80, 920), "27 November · Radhanagar, Pabna", fill=WHITE, font=sub)
+    draw.text((80, 920), "28 November · Radhanagar, Pabna", fill=WHITE, font=sub)
     body = font(FONT_REG, 28)
     draw.text(
         (80, 1000),
@@ -334,7 +334,7 @@ def main() -> None:
         "post:",
         make_post_card(
             "post-grand-opening.jpg",
-            "Inauguration · 27 November",
+            "Inauguration · 28 November",
             "Grand Opening in Pabna",
             "Export-floor casuals for everyday wear. First visitors get opening discounts + lifetime 10%.",
             WINTER / "w2.jpeg",

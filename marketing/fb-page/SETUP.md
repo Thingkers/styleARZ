@@ -52,7 +52,7 @@ After upload, check cover on phone: avatar must not cover the logo or “GRAND O
 > STYLEARZ — your personal fashion statement.  
 > Bangladesh Grade A export casuals for everyday wear — Men, Women, and Children. Shop online, then build outfits in Style Studio (mix & match, colour match, build on a budget). Lookbook, Quiz, Planner, and Wardrobe on stylearz.com.  
 > Store: College Road, Radhanagar, Pabna.  
-> Inauguration: 27 November.
+> Inauguration: 28 November.
 
 **Website:** https://stylearz.com/  
 

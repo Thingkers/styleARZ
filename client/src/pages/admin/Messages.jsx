@@ -56,34 +56,77 @@ export default function Messages() {
     }
   }
 
+  // async function sendNow() {
+  //   if (!preview?.recipientCount) {
+  //     setError("Run Preview first.");
+  //     return;
+  //   }
+  //   const ok = window.confirm(
+  //     `Send this SMS to ${preview.recipientCount} number${preview.recipientCount === 1 ? "" : "s"}?\n\nProvider: ${
+  //       sms?.provider || "log"
+  //     }\nThis uses your SMS balance when the gateway is live.`
+  //   );
+  //   if (!ok) return;
+  //   setBusy(true);
+  //   setError("");
+  //   setNotice("");
+  //   try {
+  //     const data = await api("/api/admin/messages/send", {
+  //       method: "POST",
+  //       body: { audience, message, phonesText },
+  //     });
+  //     setNotice(`Sent ${data.sent}/${data.recipientCount}${data.failed ? ` · ${data.failed} failed` : ""}.`);
+  //     setPreview(null);
+  //     load();
+  //   } catch (err) {
+  //     setError(err.message || "Send failed.");
+  //   } finally {
+  //     setBusy(false);
+  //   }
+  // }
+
+
   async function sendNow() {
+    if (sendingRef.current || busy) return;
+
     if (!preview?.recipientCount) {
       setError("Run Preview first.");
       return;
     }
+
     const ok = window.confirm(
-      `Send this SMS to ${preview.recipientCount} number${preview.recipientCount === 1 ? "" : "s"}?\n\nProvider: ${
-        sms?.provider || "log"
-      }\nThis uses your SMS balance when the gateway is live.`
+      `Send this SMS to ${preview.recipientCount} number${preview.recipientCount === 1 ? "" : "s"
+      }?\n\nProvider: ${sms?.provider || "log"}\nThis uses your SMS balance when the gateway is live.`
     );
+
     if (!ok) return;
+
+    sendingRef.current = true;
     setBusy(true);
     setError("");
     setNotice("");
+
     try {
       const data = await api("/api/admin/messages/send", {
         method: "POST",
         body: { audience, message, phonesText },
       });
-      setNotice(`Sent ${data.sent}/${data.recipientCount}${data.failed ? ` · ${data.failed} failed` : ""}.`);
+
+      setNotice(
+        `Sent ${data.sent}/${data.recipientCount}${data.failed ? ` · ${data.failed} failed` : ""
+        }.`
+      );
+
       setPreview(null);
       load();
     } catch (err) {
       setError(err.message || "Send failed.");
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   }
+
 
   if (loading) return <Loading />;
 
@@ -154,8 +197,13 @@ export default function Messages() {
             <button className="btn line" type="submit" disabled={busy || !message.trim()}>
               {busy ? "Working…" : "Preview recipients"}
             </button>
-            <button className="btn solid" type="button" disabled={busy || !preview?.recipientCount} onClick={sendNow}>
-              Send SMS
+            <button
+              className="btn solid"
+              type="button"
+              disabled={busy || !preview?.recipientCount}
+              onClick={sendNow}
+            >
+              {busy ? "Sending..." : "Send SMS"}
             </button>
           </div>
         </form>

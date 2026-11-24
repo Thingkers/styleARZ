@@ -35,7 +35,7 @@ const OFFER_TEMPLATES = [
       publicImage: "",
       publicCtaLabel: "Shop casuals",
       publicCtaHref: "/shop",
-      inaugurationNote: "Inauguration date: 27 November",
+      inaugurationNote: "Inauguration date: 28 November",
     },
   },
 ];
@@ -135,7 +135,7 @@ function fillPublicDefaults(campaign) {
     changed = true;
   }
   if (campaign.inaugurationNote === undefined) {
-    campaign.inaugurationNote = "Inauguration date: 27 November";
+    campaign.inaugurationNote = "Inauguration date: 28 November";
     changed = true;
   }
   if (!campaign.templateId && campaign.id === GRAND_OPENING_ID) {
