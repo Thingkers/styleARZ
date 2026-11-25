@@ -19,6 +19,33 @@ import {
   variantText,
 } from "./inventoryUtils";
 import { colourFromImage } from "./colorFromImage";
+import { enhancePhotoSafe, isUploadsInventoryImage, urlToDataUrl } from "./enhancePhoto";
+
+const BEAUTIFY_SESSION_KEY = "sa-inv-photos-beautified";
+
+function itemPhotoUrls(item) {
+  const list = Array.isArray(item.images) && item.images.length ? item.images : item.image ? [item.image] : [];
+  return [...new Set(list.map((src) => String(src || "").trim()).filter(isUploadsInventoryImage))];
+}
+
+function itemOriginalPhotoUrls(item) {
+  const list =
+    Array.isArray(item.imageOriginals) && item.imageOriginals.length
+      ? item.imageOriginals
+      : item.imageOriginal
+        ? [item.imageOriginal]
+        : [];
+  return [...new Set(list.map((src) => String(src || "").trim()).filter(isUploadsInventoryImage))];
+}
+
+function itemSourcePhotoUrls(item) {
+  const originals = itemOriginalPhotoUrls(item);
+  return originals.length ? originals : itemPhotoUrls(item);
+}
+
+function hasStoredOriginals(item) {
+  return itemOriginalPhotoUrls(item).length > 0;
+}
 
 const FIELDS = ["name", "color", "colorHex", "size", "category", "audience", "price", "cost", "stock", "notes", "listed", "featured"];
 const NUMBER_FIELDS = ["price", "cost", "stock"];
@@ -181,6 +208,8 @@ export function InventoryList() {
   const [query, setQuery] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [beautifying, setBeautifying] = useState(false);
+  const [beautifyProgress, setBeautifyProgress] = useState("");
   const [openKeys, setOpenKeys] = useState(() => new Set());
 
   useEffect(() => {
@@ -201,6 +230,126 @@ export function InventoryList() {
       else next.add(key);
       return next;
     });
+  }
+
+  async function beautifyExistingPhotos() {
+    const list = items || [];
+    const targets = list.filter((item) => itemSourcePhotoUrls(item).length);
+    if (!targets.length) {
+      setNotice("No uploaded inventory photos to beautify (seed/catalog images are skipped).");
+      return;
+    }
+    const already = sessionStorage.getItem(BEAUTIFY_SESSION_KEY) === "1";
+    if (
+      !window.confirm(
+        already
+          ? `Photos were already beautified this session. Run again on ${targets.length} item${targets.length === 1 ? "" : "s"}? Originals are kept so you can restore.`
+          : `Beautify photos on ${targets.length} inventory item${targets.length === 1 ? "" : "s"}? Light/background only (no rotation). Current photos are saved as Original so you can restore.`
+      )
+    ) {
+      return;
+    }
+
+    setBeautifying(true);
+    setError("");
+    setNotice("");
+    setBeautifyProgress(`Beautifying 0 / ${targets.length}…`);
+
+    const cache = new Map();
+    let done = 0;
+    let updated = 0;
+    let failed = 0;
+
+    async function enhancedFor(url) {
+      if (cache.has(url)) return cache.get(url);
+      const raw = await urlToDataUrl(url);
+      const polished = await enhancePhotoSafe(raw);
+      cache.set(url, polished);
+      return polished;
+    }
+
+    try {
+      for (const item of targets) {
+        done += 1;
+        setBeautifyProgress(`Beautifying ${done} / ${targets.length}…`);
+        const urls = itemSourcePhotoUrls(item);
+        try {
+          const polished = [];
+          for (const url of urls) {
+            polished.push(await enhancedFor(url));
+          }
+          if (!polished.length) continue;
+          const data = await api(`/api/inventory/${item.id}/image`, {
+            method: "POST",
+            body: { images: polished, replace: true, preserveOriginal: true },
+          });
+          const latest = data.item || item;
+          setItems((current) => (current || []).map((row) => (row.id === item.id ? latest : row)));
+          updated += 1;
+        } catch {
+          failed += 1;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      sessionStorage.setItem(BEAUTIFY_SESSION_KEY, "1");
+      setNotice(
+        failed
+          ? `Beautified ${updated} item${updated === 1 ? "" : "s"}; ${failed} could not be updated.`
+          : `Beautified photos on ${updated} item${updated === 1 ? "" : "s"}. Use “Restore original photos” to undo.`
+      );
+    } finally {
+      setBeautifying(false);
+      setBeautifyProgress("");
+    }
+  }
+
+  async function restoreOriginalPhotos() {
+    const list = items || [];
+    const targets = list.filter(hasStoredOriginals);
+    if (!targets.length) {
+      setNotice(
+        "No saved originals yet. Beautify again first (this keeps a copy), or use Original when capturing a new photo. Photos beautified before this update cannot be restored."
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Restore original photos on ${targets.length} item${targets.length === 1 ? "" : "s"}? Beautified versions will be replaced.`
+      )
+    ) {
+      return;
+    }
+
+    setBeautifying(true);
+    setError("");
+    setNotice("");
+    setBeautifyProgress(`Restoring 0 / ${targets.length}…`);
+    let done = 0;
+    let updated = 0;
+    let failed = 0;
+    try {
+      for (const item of targets) {
+        done += 1;
+        setBeautifyProgress(`Restoring ${done} / ${targets.length}…`);
+        try {
+          const data = await api(`/api/inventory/${item.id}/images/restore-originals`, { method: "POST", body: {} });
+          setItems((current) => (current || []).map((row) => (row.id === item.id ? data.item : row)));
+          updated += 1;
+        } catch {
+          failed += 1;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      sessionStorage.removeItem(BEAUTIFY_SESSION_KEY);
+      setNotice(
+        failed
+          ? `Restored originals on ${updated} item${updated === 1 ? "" : "s"}; ${failed} could not be restored.`
+          : `Restored original photos on ${updated} item${updated === 1 ? "" : "s"}.`
+      );
+    } finally {
+      setBeautifying(false);
+      setBeautifyProgress("");
+    }
   }
 
   async function importCatalog() {
@@ -368,6 +517,12 @@ export function InventoryList() {
         <button className="btn line" type="button" disabled={importing} onClick={importCatalog}>
           {importing ? "Importing…" : "Import shop products"}
         </button>
+        <button className="btn line" type="button" disabled={beautifying || !items?.length} onClick={beautifyExistingPhotos}>
+          {beautifying && beautifyProgress.startsWith("Beautifying") ? beautifyProgress : "Beautify existing photos"}
+        </button>
+        <button className="btn line" type="button" disabled={beautifying || !items?.length} onClick={restoreOriginalPhotos}>
+          {beautifying && beautifyProgress.startsWith("Restoring") ? beautifyProgress : "Restore original photos"}
+        </button>
         <Link className="btn line" to="/admin/barcodes">
           Print labels
         </Link>
@@ -376,6 +531,7 @@ export function InventoryList() {
         </Link>
       </div>
 
+      {beautifyProgress && <p className="muted">{beautifyProgress}</p>}
       {notice && <p className="notice">{notice}</p>}
       {error && <p className="error">{error}</p>}
 
@@ -776,6 +932,7 @@ function AddItem() {
   const suggestions = useSuggestions();
   const [form, setForm] = useState(EMPTY_FORM);
   const [photo, setPhoto] = useState("");
+  const [photoMeta, setPhotoMeta] = useState(null);
   const [colourHint, setColourHint] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -792,9 +949,9 @@ function AddItem() {
     if (flow && flow.getBoundingClientRect().top < 0) flow.scrollIntoView({ block: "start" });
   }, [step]);
 
-  async function onPhoto(dataUrl) {
-    const requestId = ++photoRequestRef.current;
+  async function onPhoto(dataUrl, meta) {
     setPhoto(dataUrl);
+    setPhotoMeta(meta && meta.original ? meta : null);
     setColourHint(null);
     setError("");
     if (!dataUrl) return;
@@ -829,24 +986,28 @@ function AddItem() {
     setError("");
     const sizes = selectedSizes(form);
     const base = toPayload(form);
+    const created = [];
+    let sharedStyleId = "";
     try {
-      const data = await api("/api/inventory/batch", {
-        method: "POST",
-        body: {
-          items: sizes.map((size) => ({ ...base, size })),
-          ...(photo ? { image: photo } : {}),
-        },
-      });
-      const created = data.items;
-      const ids = created.map((item) => item.id).join(",");
-      const notice =
-        created.length === 1
-          ? `${created[0].name} saved with barcode ${created[0].barcode}.`
-          : `${created.length} sizes saved (${created.map((item) => item.size).join(", ")}). Each has its own barcode.`;
-      navigate(`/admin/barcodes?ids=${encodeURIComponent(ids)}`, {
-        replace: true,
-        state: { notice },
-      });
+      for (const size of sizes) {
+        const body = { ...base, size };
+        if (sharedStyleId) body.styleId = sharedStyleId;
+        const { item } = await api("/api/inventory", {
+          method: "POST",
+          body,
+        });
+        if (!sharedStyleId) sharedStyleId = item.styleId || item.id;
+        if (photo) {
+          try {
+            const body = { image: photo, replace: true };
+            if (photoMeta?.original) body.original = photoMeta.original;
+            await api(`/api/inventory/${item.id}/image`, { method: "POST", body });
+          } catch {
+            /* photo optional per variant */
+          }
+        }
+        created.push(item);
+      }
     } catch (err) {
       setError(err.message);
       setSaving(false);
@@ -887,6 +1048,7 @@ function AddItem() {
             onRemove={() => {
               photoRequestRef.current += 1;
               setPhoto("");
+              setPhotoMeta(null);
               setColourHint(null);
             }}
             note="Shoot the piece flat or on a hanger against a plain background. Colour is suggested from the photo."
@@ -1033,7 +1195,9 @@ function EditItem({ id }) {
   const [item, setItem] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [photo, setPhoto] = useState("");
+  const [photoMeta, setPhotoMeta] = useState(null);
   const [removePhoto, setRemovePhoto] = useState(false);
+  const [restoringOriginal, setRestoringOriginal] = useState(false);
   const [barcodeSvg, setBarcodeSvg] = useState("");
   const [barcodeError, setBarcodeError] = useState("");
   const [siblings, setSiblings] = useState([]);
@@ -1146,9 +1310,12 @@ function EditItem({ id }) {
 
     if (photo) {
       try {
-        const data = await api(`/api/inventory/${id}/image`, { method: "POST", body: { image: photo } });
+        const body = { image: photo, replace: true, preserveOriginal: true };
+        if (photoMeta?.original) body.original = photoMeta.original;
+        const data = await api(`/api/inventory/${id}/image`, { method: "POST", body });
         setItem(data.item);
         setPhoto("");
+        setPhotoMeta(null);
       } catch (err) {
         setError(`Details saved, but the photo didn't upload: ${err.message}`);
         setSaving(false);
@@ -1158,6 +1325,24 @@ function EditItem({ id }) {
 
     setNotice("Changes saved.");
     setSaving(false);
+  }
+
+  async function restoreOriginal() {
+    if (!window.confirm("Restore the original photo for this item? The beautified shop image will be replaced.")) return;
+    setRestoringOriginal(true);
+    setError("");
+    try {
+      const data = await api(`/api/inventory/${id}/images/restore-originals`, { method: "POST", body: {} });
+      setItem(data.item);
+      setPhoto("");
+      setPhotoMeta(null);
+      setRemovePhoto(false);
+      setNotice("Original photo restored.");
+    } catch (err) {
+      setError(err.message || "Could not restore the original photo.");
+    } finally {
+      setRestoringOriginal(false);
+    }
   }
 
   async function remove() {
@@ -1203,12 +1388,25 @@ function EditItem({ id }) {
                       ? [item.image]
                       : []
             }
-            onAdd={async (dataUrl) => {
+            onChange={(dataUrl, meta) => {
+              setPhoto(dataUrl);
+              setPhotoMeta(meta && meta.original ? meta : null);
+              setRemovePhoto(false);
+            }}
+            onAdd={async (dataUrl, meta) => {
               setError("");
               try {
-                const data = await api(`/api/inventory/${id}/images`, { method: "POST", body: { image: dataUrl } });
+                const empty = !(item.images && item.images.length) && !item.image;
+                const body = empty
+                  ? { image: dataUrl, replace: true, original: meta?.original, preserveOriginal: true }
+                  : { image: dataUrl };
+                const data = await api(empty ? `/api/inventory/${id}/image` : `/api/inventory/${id}/images`, {
+                  method: "POST",
+                  body,
+                });
                 setItem(data.item);
                 setPhoto("");
+                setPhotoMeta(null);
                 setRemovePhoto(false);
                 setNotice("Photo added.");
                 if (!form.color.trim()) {
@@ -1230,12 +1428,16 @@ function EditItem({ id }) {
                 const data = await api(`/api/inventory/${id}/images/${index}`, { method: "DELETE" });
                 setItem(data.item);
                 setPhoto("");
+                setPhotoMeta(null);
                 setNotice("Photo removed.");
               } catch (err) {
                 setError(err.message || "Could not remove photo.");
               }
             }}
-            note="Add up to 8 angles. The first photo is the main shop image."
+            canRestoreOriginal={hasStoredOriginals(item)}
+            restoringOriginal={restoringOriginal}
+            onRestoreOriginal={restoreOriginal}
+            note="Add up to 8 angles. The first photo is the main shop image. Use Original / Beautified before adding a new shot."
           />
           <section className="inv-barcode-card">
             <p className="kicker">Barcode</p>

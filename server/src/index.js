@@ -1289,15 +1289,30 @@ app.delete("/api/inventory/:id", requireAdmin, handle(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post("/api/inventory/:id/image", requireAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
+app.post("/api/inventory/:id/image", requireAdmin, express.json({ limit: "6mb" }), handle(async (req, res) => {
   const item = inventory.findById(db, req.params.id);
   if (!item) return fail(res, 404, "Item not found.");
   const replace = req.body && req.body.replace === true;
-  if (replace || inventory.itemImages(item).length === 0) {
+  const preserveOriginal = req.body && req.body.preserveOriginal === true;
+  const gallery = Array.isArray(req.body && req.body.images) ? req.body.images.filter(Boolean) : null;
+
+  if (gallery && gallery.length) {
+    inventory.replaceItemImagesPreservingOriginals(db, item.id, uploadsDir, gallery);
+  } else if (replace || inventory.itemImages(item).length === 0) {
     const previous = inventory.itemImages(item);
+    if (preserveOriginal && !inventory.itemImageOriginals(item).length && previous.length) {
+      inventory.syncItemImageOriginals(item, previous);
+    }
+    if (typeof req.body?.original === "string" && req.body.original.startsWith("data:") && !inventory.itemImageOriginals(item).length) {
+      const originalUrl = inventory.saveImageFromBase64(uploadsDir, item.id, req.body.original);
+      inventory.syncItemImageOriginals(item, [originalUrl]);
+    }
     const url = inventory.saveImageFromBase64(uploadsDir, item.id, req.body && req.body.image);
+    const protectedUrls = new Set(inventory.itemImageOriginals(item));
     inventory.syncItemImages(item, [url]);
-    previous.forEach((src) => inventory.removeImageFile(uploadsDir, src));
+    previous.forEach((src) => {
+      if (!protectedUrls.has(src)) inventory.removeImageFile(uploadsDir, src);
+    });
   } else {
     inventory.appendItemImage(db, item.id, uploadsDir, req.body && req.body.image);
   }
@@ -1309,6 +1324,12 @@ app.post("/api/inventory/:id/image", requireAdmin, express.json({ limit: "3mb" }
 
 app.post("/api/inventory/:id/images", requireAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
   const item = inventory.appendItemImage(db, req.params.id, uploadsDir, req.body && req.body.image);
+  await store.save();
+  res.json({ item });
+}));
+
+app.post("/api/inventory/:id/images/restore-originals", requireAdmin, handle(async (req, res) => {
+  const item = inventory.restoreItemImageOriginals(db, req.params.id, uploadsDir);
   await store.save();
   res.json({ item });
 }));

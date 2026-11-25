@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/ui";
-
-const MAX_EDGE = 1600;
-// The API rejects images larger than 2 MB once decoded.
-const MAX_BYTES = 1.9 * 1024 * 1024;
-const MAX_PHOTOS = 8;
+import { compressPhoto, MAX_BYTES, MAX_EDGE, preparePhotoPair } from "./enhancePhoto";
 
 function canUseLiveCamera() {
   return Boolean(navigator.mediaDevices?.getUserMedia);
 }
+
+const MAX_PHOTOS = 8;
 
 function toJpeg(source, width, height) {
   if (!width || !height) throw new Error("Couldn't read the image dimensions. Try another photo.");
@@ -29,7 +27,17 @@ function toJpeg(source, width, height) {
   throw new Error("That photo is too large. Try a smaller image.");
 }
 
-async function photoFromFile(file) {
+async function pairFromSource(source, width, height) {
+  const raw = toJpeg(source, width, height);
+  try {
+    return await preparePhotoPair(raw);
+  } catch {
+    const original = await compressPhoto(raw);
+    return { original, enhanced: original };
+  }
+}
+
+async function pairFromFile(file) {
   if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
   if (typeof createImageBitmap === "function") {
     let image;
@@ -57,7 +65,7 @@ async function photoFromFile(file) {
     await image.decode().catch(() => {
       throw new Error("Couldn't read that image. Try a JPEG or PNG photo.");
     });
-    return toJpeg(image, image.naturalWidth, image.naturalHeight);
+    return pairFromSource(image, image.naturalWidth, image.naturalHeight);
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -83,6 +91,7 @@ function LiveCamera({ onCapture, onClose }) {
   const [facing, setFacing] = useState("environment");
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let stream = null;
@@ -123,13 +132,17 @@ function LiveCamera({ onCapture, onClose }) {
     };
   }, [facing]);
 
-  function capture() {
+  async function capture() {
     const video = videoRef.current;
-    if (!video?.videoWidth) return;
+    if (!video?.videoWidth || busy) return;
+    setBusy(true);
+    setError("");
     try {
-      onCapture(toJpeg(video, video.videoWidth, video.videoHeight));
+      const pair = await pairFromSource(video, video.videoWidth, video.videoHeight);
+      onCapture(pair);
     } catch (err) {
       setError(err.message);
+      setBusy(false);
     }
   }
 
@@ -142,8 +155,8 @@ function LiveCamera({ onCapture, onClose }) {
         </div>
         {error && <p className="error">{error}</p>}
         <div className="inv-camera-actions">
-          <button type="button" className="btn solid" disabled={!ready} onClick={capture}>
-            Capture
+          <button type="button" className="btn solid" disabled={!ready || busy} onClick={capture}>
+            {busy ? "Cleaning…" : "Capture"}
           </button>
           <button
             type="button"
@@ -161,6 +174,19 @@ function LiveCamera({ onCapture, onClose }) {
   );
 }
 
+function StageToggle({ stage, onChange, disabled }) {
+  return (
+    <div className="pills inv-photo-stage" role="group" aria-label="Photo stage">
+      <button type="button" className={stage === "enhanced" ? "on" : ""} aria-pressed={stage === "enhanced"} disabled={disabled} onClick={() => onChange("enhanced")}>
+        Beautified
+      </button>
+      <button type="button" className={stage === "original" ? "on" : ""} aria-pressed={stage === "original"} disabled={disabled} onClick={() => onChange("original")}>
+        Original
+      </button>
+    </div>
+  );
+}
+
 /** Single-photo API kept for create wizard; multi via `images` + onAdd/onRemoveAt. */
 export default function ItemPhoto({
   src,
@@ -171,6 +197,9 @@ export default function ItemPhoto({
   onRemoveAt,
   note,
   max = MAX_PHOTOS,
+  canRestoreOriginal = false,
+  onRestoreOriginal,
+  restoringOriginal = false,
 }) {
   const gallery = Array.isArray(images) && images.length ? images : src ? [src] : [];
   const multi = Boolean(onAdd || onRemoveAt);
@@ -178,10 +207,37 @@ export default function ItemPhoto({
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [active, setActive] = useState(0);
+  const [draft, setDraft] = useState(null); // { original, enhanced, stage }
 
   useEffect(() => {
     if (active >= gallery.length) setActive(Math.max(0, gallery.length - 1));
   }, [gallery.length, active]);
+
+  useEffect(() => {
+    // Clear local draft when parent gallery replaces it (saved / removed).
+    if (!draft) return;
+    const activeUrl = draft.stage === "original" ? draft.original : draft.enhanced;
+    if (src === activeUrl || (gallery.length && gallery.includes(activeUrl))) return;
+    if (!src && !gallery.length) setDraft(null);
+  }, [src, gallery, draft]);
+
+  function commitDraft(next) {
+    setDraft(next);
+    const url = next.stage === "original" ? next.original : next.enhanced;
+    if (multi && onAdd) {
+      /* multi adds happen once via applyDraftAdd */
+    } else if (onChange) {
+      onChange(url, { original: next.original, enhanced: next.enhanced, stage: next.stage });
+    }
+  }
+
+  async function applyDraftAdd(next) {
+    if (!onAdd) return;
+    if (gallery.length >= max) throw new Error(`You can add up to ${max} photos.`);
+    const url = next.stage === "original" ? next.original : next.enhanced;
+    await onAdd(url, { original: next.original, enhanced: next.enhanced, stage: next.stage });
+    setDraft(null);
+  }
 
   async function ingest(file) {
     if (!file) return;
@@ -189,12 +245,12 @@ export default function ItemPhoto({
     setError("");
     setWorking(true);
     try {
-      const dataUrl = await photoFromFile(file);
+      const pair = await pairFromFile(file);
+      const next = { ...pair, stage: "enhanced" };
       if (multi && onAdd) {
-        if (gallery.length >= max) throw new Error(`You can add up to ${max} photos.`);
-        await onAdd(dataUrl);
-      } else if (onChange) {
-        onChange(dataUrl);
+        setDraft(next);
+      } else {
+        commitDraft(next);
       }
     } catch (err) {
       if (operation === operationRef.current) setError(err.message);
@@ -209,13 +265,28 @@ export default function ItemPhoto({
     await ingest(file);
   }
 
-  const primary = gallery[active] || gallery[0] || "";
+  function setStage(stage) {
+    if (!draft) return;
+    const next = { ...draft, stage };
+    if (multi && onAdd) {
+      setDraft(next);
+    } else {
+      commitDraft(next);
+    }
+  }
+
+  const preview = draft
+    ? draft.stage === "original"
+      ? draft.original
+      : draft.enhanced
+    : gallery[active] || gallery[0] || "";
+  const autoNote = "Beautify cleans light and background only — it does not rotate the photo. Switch to Original anytime before saving.";
 
   return (
     <div className="inv-photo">
-      {primary ? (
+      {preview ? (
         <div className="inv-photo-frame has-photo">
-          <img src={primary} alt="Item photo" />
+          <img src={preview} alt="Item photo" />
         </div>
       ) : (
         <label className="inv-photo-frame inv-file">
@@ -231,7 +302,20 @@ export default function ItemPhoto({
         </label>
       )}
 
-      {gallery.length > 1 && (
+      {draft && <StageToggle stage={draft.stage} onChange={setStage} disabled={working} />}
+
+      {draft && multi && onAdd && (
+        <div className="inv-photo-actions">
+          <button type="button" className="btn solid" disabled={working} onClick={() => applyDraftAdd(draft).catch((err) => setError(err.message))}>
+            Use {draft.stage === "original" ? "original" : "beautified"} photo
+          </button>
+          <button type="button" className="text-link" onClick={() => setDraft(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {!draft && gallery.length > 1 && (
         <div className="inv-photo-thumbs" role="list">
           {gallery.map((entry, index) => (
             <button
@@ -246,23 +330,29 @@ export default function ItemPhoto({
         </div>
       )}
 
-      {note && <p className="muted inv-photo-note">{note}</p>}
+      <p className="muted inv-photo-note">{note || autoNote}</p>
+      {note && <p className="muted inv-photo-note">{autoNote}</p>}
       {error && <p className="error">{error}</p>}
       <div className="inv-photo-actions">
         <label className="btn dark inv-file inv-file-capture">
-          Take photo
+          {working ? "Preparing…" : "Take photo"}
           <input type="file" accept="image/*" capture="environment" onChange={onFile} disabled={working || gallery.length >= max} />
         </label>
         <label className="btn line inv-file">
-          {multi ? (gallery.length ? "Add photo" : "Upload photo") : src ? "Replace photo" : "Upload photo"}
+          {working ? "Preparing…" : multi ? (gallery.length ? "Add photo" : "Upload photo") : src ? "Replace photo" : "Upload photo"}
           <input type="file" accept="image/*" onChange={onFile} disabled={working || gallery.length >= max} />
         </label>
         {canUseLiveCamera() && (
-          <button type="button" className="btn line" onClick={() => setCamera(true)} disabled={gallery.length >= max}>
+          <button type="button" className="btn line" onClick={() => setCamera(true)} disabled={gallery.length >= max || working}>
             Live camera
           </button>
         )}
-        {multi && gallery.length > 0 && onRemoveAt && (
+        {canRestoreOriginal && onRestoreOriginal && (
+          <button type="button" className="btn line" disabled={restoringOriginal || working} onClick={onRestoreOriginal}>
+            {restoringOriginal ? "Restoring…" : "Restore original"}
+          </button>
+        )}
+        {multi && gallery.length > 0 && onRemoveAt && !draft && (
           <button type="button" className="text-link" onClick={() => onRemoveAt(active)}>
             Remove this photo
           </button>
@@ -276,11 +366,15 @@ export default function ItemPhoto({
       {camera && (
         <LiveCamera
           onClose={() => setCamera(false)}
-          onCapture={async (dataUrl) => {
+          onCapture={async (pair) => {
             setError("");
             try {
-              if (multi && onAdd) await onAdd(dataUrl);
-              else if (onChange) onChange(dataUrl);
+              const next = { ...pair, stage: "enhanced" };
+              if (multi && onAdd) {
+                setDraft(next);
+              } else {
+                commitDraft(next);
+              }
               setCamera(false);
             } catch (err) {
               setError(err.message);

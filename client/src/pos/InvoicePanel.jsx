@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { money, prettyDateTime } from "../format";
+import { printInvoiceElement } from "./printInvoice";
 
 const INVOICE_PRESETS = [
   { id: "a4", label: "A4 (210×297 mm)", kind: "sheet", w: 210, h: 297 },
@@ -53,15 +54,9 @@ export default function InvoicePanel({
   if (!sale) return null;
 
   function printInvoice() {
-    document.body.classList.add("pos-printing-invoice");
-    document.body.dataset.invoicePreset = preset.id;
-    const cleanup = () => {
-      document.body.classList.remove("pos-printing-invoice");
-      delete document.body.dataset.invoicePreset;
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.setTimeout(() => window.print(), 50);
+    const source = document.getElementById("pos-invoice-print");
+    if (!source) return;
+    printInvoiceElement(source, preset, sale.receiptNo || sale.id || "Invoice");
   }
 
   const canSms = Boolean(sale.id) && !String(sale.id).startsWith("offline_");
@@ -130,7 +125,9 @@ export default function InvoicePanel({
       <div className="pos-invoice-stage no-print" aria-hidden="true">
         <p className="muted">
           Preview · {preset.label}
-          {preset.kind === "thermal" ? " · receipt roll" : " · sheet"}
+          {preset.kind === "thermal"
+            ? " · receipt roll — print opens a roll-sized page (set Margins to None, uncheck headers)"
+            : " · sheet"}
         </p>
       </div>
 
@@ -183,7 +180,18 @@ export default function InvoicePanel({
               <tr key={`${line.itemId || line.barcode || "line"}-${index}`}>
                 <td>
                   <div className="pos-invoice-item">
-                    <img src={thumbSrc(line)} alt="" width={40} height={40} loading="lazy" />
+                    {preset.kind !== "thermal" && (
+                      <img
+                        src={thumbSrc(line)}
+                        alt=""
+                        width={40}
+                        height={40}
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    )}
                     <span>
                       <strong>{line.name}</strong>
                       <small>{[line.color, line.size, line.barcode].filter(Boolean).join(" · ")}</small>

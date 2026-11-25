@@ -188,7 +188,9 @@ export default function Product() {
       </p>
       <div className="pdp">
         <div className="gallery">
-          <img src={activeImage} alt={product.name} />
+          <div className="gallery-main">
+            <img src={activeImage} alt={product.name} />
+          </div>
           {gallery.length > 1 && (
             <div className="gallery-thumbs" role="list">
               {gallery.map((src, index) => (
@@ -196,6 +198,8 @@ export default function Product() {
                   key={`${src}-${index}`}
                   type="button"
                   className={index === imageIndex ? "on" : ""}
+                  aria-label={`Photo ${index + 1} of ${gallery.length}`}
+                  aria-pressed={index === imageIndex}
                   onClick={() => setImageIndex(index)}
                 >
                   <img src={src} alt="" />
