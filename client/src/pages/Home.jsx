@@ -4,7 +4,10 @@ import { api } from "../api";
 import { useDocumentTitle } from "../hooks";
 import ProductCard from "../components/ProductCard";
 import { Loading } from "../components/ui";
-import { readStoredQuiz } from "../quizStore";
+import { FEATURED_CATEGORIES } from "../components/CategoryIcons";
+import HeroOfferSlides from "../components/HeroOfferSlides";
+import HeroWinterStrip from "../components/HeroWinterStrip";
+import { WINTER_COLLECTION } from "../home/features";
 
 export default function Home() {
   useDocumentTitle("");
@@ -12,6 +15,7 @@ export default function Home() {
   const [collections, setCollections] = useState([]);
   const [looks, setLooks] = useState([]);
   const [posts, setPosts] = useState([]);
+  const [deck, setDeck] = useState(null);
   const [quiz, setQuiz] = useState(null);
   const [loading, setLoading] = useState({
     products: true,
@@ -30,48 +34,73 @@ export default function Home() {
     } catch (err) {
       setErrors((current) => ({ ...current, quiz: err.message }));
     }
-
-    function loadSection(section, path, onSuccess, normalize = (value) => value) {
-      api(path)
-        .then((data) => onSuccess(normalize(data)))
-        .catch((err) => setErrors((current) => ({ ...current, [section]: err.message })))
-        .finally(() => setLoading((current) => ({ ...current, [section]: false })));
-    }
-
-    loadSection("products", "/api/products?featured=1", (items) => setProducts(items), (data) => Array.isArray(data?.products) ? data.products : []);
-    loadSection("collections", "/api/home-collections", (items) => setCollections(items), (data) => Array.isArray(data?.collections) ? data.collections : []);
-    loadSection("looks", "/api/looks", (items) => setLooks(items), (data) => Array.isArray(data?.looks) ? data.looks : []);
-    loadSection("posts", "/api/community", (items) => setPosts(items), (data) => {
-      const posts = Array.isArray(data?.posts) ? data.posts : [];
-      return posts.slice(0, 3);
-    });
+    Promise.all([
+      api("/api/products?featured=1"),
+      api("/api/home-collections"),
+      api("/api/looks"),
+      api("/api/community"),
+      api("/api/offers").catch(() => ({ deck: null })),
+    ])
+      .then(([productData, collectionData, lookData, postData, offerData]) => {
+        setProducts(productData.products);
+        setCollections(collectionData.collections || []);
+        setLooks(lookData.looks);
+        setPosts(postData.posts.slice(0, 3));
+        setDeck(offerData.deck && Array.isArray(offerData.deck.cards) && offerData.deck.cards.length ? offerData.deck : null);
+      })
+      .catch((err) => setError(err.message));
   }, []);
+
+  const hasOfferDeck = Boolean(deck?.cards?.length);
 
   return (
     <div className="home">
-      <section className="hero">
-        <div className="hero-media" aria-hidden="true">
-          <span className="hero-pane hero-pane-style" />
-          <span className="hero-pane hero-pane-arz" />
-        </div>
-        <div className="hero-copy">
-          <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
-            <span className="logo-style">STYLE</span>
-            <span className="logo-arz">ARZ</span>
-          </span>
-          <p className="hero-tag">your personal fashion statement</p>
-          <h1>Export casuals, made for how Bangladesh dresses.</h1>
-          <p className="hero-lede">
-            Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
-            specs, priced for everyday.
-          </p>
-          <div className="hero-actions">
-            <Link className="btn solid" to="/shop">
-              Shop casuals
-            </Link>
-            <Link className="btn line light" to="/quiz">
-              Take the style quiz
-            </Link>
+      <section className={`hero ${hasOfferDeck ? "has-offers" : ""} hero-has-winter`}>
+        <div className="hero-media" aria-hidden="true" />
+        <aside className="hero-rail" aria-label="Shop by category">
+          <ul className="rail-icons">
+            {FEATURED_CATEGORIES.map(({ key, label, src }) => (
+              <li key={key}>
+                <Link to={`/shop?category=${encodeURIComponent(key)}`} className="rail-icon" aria-label={label}>
+                  <span className="rail-icon-disc" aria-hidden="true">
+                    <img src={src} alt="" width={56} height={56} decoding="async" />
+                  </span>
+                  <span className="rail-icon-label">{label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </aside>
+        <div className={`hero-layout ${hasOfferDeck ? "hero-layout-offers" : ""}`}>
+          <div className="hero-copy">
+            <div className="hero-brand">
+              <span className="logo-lockup hero-lockup" aria-label="STYLEARZ">
+                <span className="logo-style">STYLE</span>
+                <span className="logo-arz">ARZ</span>
+              </span>
+              <p className="hero-tag">your personal fashion statement</p>
+            </div>
+            {!hasOfferDeck && (
+              <>
+                <h1>Export casuals, made for how Bangladesh dresses.</h1>
+                <p className="hero-lede">
+                  Grade A RMG from Bangladesh’s garment floors — soft shirts, polos, chinos, knits, and easy dresses built to export
+                  specs, priced for everyday.
+                </p>
+                <div className="hero-actions">
+                  <Link className="btn solid" to="/shop">
+                    Shop casuals
+                  </Link>
+                  <Link className="btn line light" to="/quiz">
+                    Take the style quiz
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+          <div className={`hero-split ${hasOfferDeck ? "hero-split-offers" : ""}`}>
+            {hasOfferDeck ? <HeroOfferSlides deck={deck} /> : null}
+            <HeroWinterStrip />
           </div>
         </div>
       </section>
@@ -82,6 +111,28 @@ export default function Home() {
         <li>Men · Women · Children</li>
         <li>Free shipping over ৳8,000</li>
       </ul>
+
+      <section className="wrap winter-collection reveal" aria-label="Winter collection">
+        <div className="section-head">
+          <div>
+            <p className="kicker">Winter collection</p>
+            <h2>Knits and layers for the season ahead</h2>
+          </div>
+          <Link to="/shop?category=Knitwear">Shop winter</Link>
+        </div>
+        <div className="winter-grid">
+          {WINTER_COLLECTION.map((item) => (
+            <Link
+              key={item.src}
+              to={`/shop?category=${encodeURIComponent(item.key)}`}
+              className="winter-tile"
+            >
+              <img src={item.src} alt="" loading="lazy" decoding="async" />
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section className="wrap collections">
         {errors.collections && <p className="error">{errors.collections}</p>}

@@ -29,10 +29,40 @@ function piece(data) {
     grade: "A",
     sizes: MEN,
     occasions: ["Everyday"],
+    // Seed catalog pieces are homepage/look imagery — not real floor stock.
+    productKind: "display",
     sortOrder,
     ...data,
   };
 }
+
+/** Seed / demo catalog ids — marketing images moved to Home products, not inventory. */
+const SEED_CATALOG_IDS = [
+  "mens-oxford",
+  "mens-polo",
+  "mens-trouser",
+  "mens-blazer",
+  "mens-chino",
+  "mens-knit",
+  "womens-blouse",
+  "womens-shirtdress",
+  "womens-trouser",
+  "womens-cardigan",
+  "womens-dress",
+  "womens-scarf",
+  "boys-shirt",
+  "boys-polo",
+  "girls-dress",
+  "girls-cardigan",
+  "kids-chino",
+  "kids-set",
+  "womens-saree",
+  "mens-panjabi",
+  "mens-jeans",
+  "unisex-tee",
+  "womens-day-dress",
+  "mens-casual-shirt",
+];
 
 function retailItem(seq, data) {
   const stamp = daysAgo(10);
@@ -51,6 +81,176 @@ function retailItem(seq, data) {
     id: `inv_seed${seq}`,
     barcode: makeBarcode(seq),
   };
+}
+
+/** Banner-icon categories that must resolve to shop products. */
+function iconCategoryProducts() {
+  return [
+    piece({
+      id: "womens-saree",
+      name: "Everyday Soft Saree",
+      audience: "Women",
+      category: "Saree",
+      slot: "dress",
+      price: 4800,
+      featured: true,
+      sizes: ["Free"],
+      colors: [{ name: "Ivory", hex: "#f3efe6" }],
+      occasions: ["Everyday", "Weekend"],
+      image: "/images/womens-saree.jpg",
+      description:
+        "Soft everyday saree in ivory — light drape and clean border finishing from Bangladesh’s woven programmes.",
+      details: ["Soft weave", "Bangladesh Grade A export", "Saree programme", "Dry clean preferred"],
+    }),
+    piece({
+      id: "mens-panjabi",
+      name: "Classic Cotton Panjabi",
+      audience: "Men",
+      category: "Panjabi",
+      slot: "top",
+      price: 2650,
+      featured: true,
+      stock: 18,
+      colors: [{ name: "White", hex: "#f7f7f5" }],
+      occasions: ["Everyday", "Weekend"],
+      image: "/images/mens-panjabi.jpg",
+      description:
+        "Straight-cut cotton panjabi with a clean placket and side vents — Grade A casual finishing for everyday wear.",
+      details: ["Cotton", "Bangladesh Grade A export", "Panjabi programme", "Machine wash cold"],
+    }),
+    piece({
+      id: "mens-jeans",
+      name: "Export Slim Jeans",
+      audience: "Men",
+      category: "Jeans",
+      slot: "bottom",
+      price: 3200,
+      featured: true,
+      stock: 20,
+      colors: [{ name: "Indigo", hex: "#2c3a5a" }],
+      occasions: ["Everyday", "Weekend"],
+      image: "/images/mens-jeans.jpg",
+      description:
+        "Slim indigo jeans from Bangladesh denim programmes — soft hand, clean seams, everyday rise.",
+      details: ["Cotton denim", "Bangladesh Grade A export", "Jeans programme", "Machine wash cold"],
+    }),
+    piece({
+      id: "unisex-tee",
+      name: "Soft Jersey T-Shirt",
+      audience: "Unisex",
+      category: "T-Shirt",
+      slot: "top",
+      price: 950,
+      featured: true,
+      stock: 40,
+      colors: [
+        { name: "White", hex: "#f7f7f5" },
+        { name: "Ivory", hex: "#f3efe6" },
+      ],
+      occasions: ["Everyday", "Weekend", "Travel"],
+      image: "/images/unisex-tee.jpg",
+      description:
+        "Soft jersey T-shirt with taped shoulders and a clean neck rib — everyday knit from Bangladesh export floors.",
+      details: ["Cotton jersey", "Bangladesh Grade A export", "T-Shirt programme", "Machine wash cold"],
+    }),
+    piece({
+      id: "womens-day-dress",
+      name: "Easy Cotton Dress",
+      audience: "Women",
+      category: "Dress",
+      slot: "dress",
+      price: 3600,
+      featured: true,
+      sizes: WOMEN,
+      colors: [{ name: "Stone", hex: "#cfc6ba" }],
+      occasions: ["Everyday", "Weekend"],
+      image: "/images/womens-shirtdress.jpg",
+      description:
+        "Easy cotton day dress with a soft waist — pairs with the banner Dress edit from Bangladesh casual programmes.",
+      details: ["Cotton", "Bangladesh Grade A export", "Dress programme", "Machine wash cold"],
+    }),
+    piece({
+      id: "mens-casual-shirt",
+      name: "Everyday Casual Shirt",
+      audience: "Men",
+      category: "Shirt",
+      slot: "top",
+      price: 2100,
+      featured: true,
+      stock: 22,
+      colors: [{ name: "Sky", hex: "#8eafc6" }],
+      occasions: ["Everyday", "Weekend"],
+      image: "/images/mens-oxford.jpg",
+      description:
+        "Light casual shirt in sky cotton — set collar and clean yoke for the banner Shirt edit.",
+      details: ["Cotton", "Bangladesh Grade A export", "Shirt programme", "Machine wash cold"],
+    }),
+  ];
+}
+
+/** Upsert banner-icon products into an existing database and keep images in sync. */
+function ensureIconCategoryProducts(db) {
+  if (!Array.isArray(db.products)) db.products = [];
+  let changed = false;
+  const extras = iconCategoryProducts();
+  const maxSort = db.products.reduce((max, product) => {
+    const order = Number.isFinite(product.sortOrder) ? product.sortOrder : 0;
+    return Math.max(max, order);
+  }, 0);
+  extras.forEach((product, index) => {
+    const existing = db.products.find((entry) => entry.id === product.id);
+    if (!existing) {
+      db.products.push({
+        ...product,
+        productKind: "display",
+        sortOrder: maxSort + index + 1,
+        featured: product.featured !== false,
+      });
+      changed = true;
+      return;
+    }
+    if (existing.productKind !== "display") {
+      existing.productKind = "display";
+      changed = true;
+    }
+    ["image", "name", "category", "audience", "description"].forEach((key) => {
+      if (product[key] && existing[key] !== product[key]) {
+        existing[key] = product[key];
+        changed = true;
+      }
+    });
+  });
+
+  const needed = [
+    { name: "Saree", audiences: ["Women"] },
+    { name: "Panjabi", audiences: ["Men", "Children"] },
+    { name: "Dress", audiences: ["Women", "Children"] },
+    { name: "Jeans", audiences: ["Men", "Women", "Children", "Unisex"] },
+    { name: "Shirt", audiences: ["Men", "Women", "Children", "Unisex"] },
+    { name: "T-Shirt", audiences: ["Men", "Women", "Children", "Unisex"] },
+    { name: "Shirts", audiences: ["Men", "Women", "Children", "Unisex"] },
+    { name: "Dresses", audiences: ["Women", "Children"] },
+  ];
+  if (!Array.isArray(db.inventoryCategories)) db.inventoryCategories = [];
+  needed.forEach((entry) => {
+    const index = db.inventoryCategories.findIndex(
+      (item) => String(typeof item === "string" ? item : item.name).toLowerCase() === entry.name.toLowerCase()
+    );
+    if (index < 0) {
+      db.inventoryCategories.push(entry);
+      changed = true;
+      return;
+    }
+    const current = db.inventoryCategories[index];
+    if (typeof current === "string") {
+      db.inventoryCategories[index] = entry;
+      changed = true;
+    } else if (!Array.isArray(current.audiences) || !current.audiences.length) {
+      current.audiences = entry.audiences.slice();
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 function buildSeed() {
@@ -344,6 +544,7 @@ function buildSeed() {
         "Navy polo with stone shorts as a matched casual set — one Grade A outfit without building piece by piece.",
       details: ["Cotton pique and twill", "Bangladesh Grade A export", "Kids casual programme", "Ages 2–12"],
     }),
+    ...iconCategoryProducts(),
   ];
 
   const looks = [
@@ -484,7 +685,7 @@ function buildSeed() {
         id: "u_admin",
         name: "Studio Admin",
         email: "admin@stylearz.com",
-        role: "admin",
+        role: "superadmin",
         ...adminPass,
         wishlist: [],
         preferences: null,
@@ -497,7 +698,21 @@ function buildSeed() {
     inventoryItems,
     inventorySeq: 1004,
     inventoryDeleted: [],
-    inventoryCategories: ["Shirts", "Knitwear", "Trousers", "Outerwear", "Dresses", "Sets", "Accessories"],
+    inventoryCategories: [
+      { name: "Saree", audiences: ["Women"] },
+      { name: "Panjabi", audiences: ["Men", "Children"] },
+      { name: "Dress", audiences: ["Women", "Children"] },
+      { name: "Jeans", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Shirt", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "T-Shirt", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Shirts", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Knitwear", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Trousers", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Outerwear", audiences: ["Men", "Women", "Children", "Unisex"] },
+      { name: "Dresses", audiences: ["Women", "Children"] },
+      { name: "Sets", audiences: ["Children", "Unisex"] },
+      { name: "Accessories", audiences: ["Men", "Women", "Children", "Unisex"] },
+    ],
     posSessions: [],
     posScanEvents: [],
     posSales: [],
@@ -526,9 +741,39 @@ function buildSeed() {
         subtotal: 2450,
         shipping: 120,
         total: 2570,
+        paymentMethod: "card",
         paymentLast4: "4242",
         status: "shipped",
         createdAt: daysAgo(6),
+      },
+      {
+        id: "SA-18421",
+        userId: "u_farhan",
+        email: "farhan@stylearz.com",
+        name: "Farhan Ahmed",
+        phone: "+880 1700 000000",
+        address: "House 18, Road 12, Gulshan 1",
+        city: "Dhaka",
+        country: "Bangladesh",
+        notes: "COD preferred",
+        items: [
+          {
+            productId: "mens-chino",
+            name: "Export Chino",
+            price: 2850,
+            qty: 1,
+            size: "32",
+            color: "Sand",
+            image: "/images/mens-chino.jpg",
+          },
+        ],
+        subtotal: 2200,
+        shipping: 120,
+        total: 2320,
+        paymentMethod: "cod",
+        paymentLast4: null,
+        status: "confirmed",
+        createdAt: daysAgo(2),
       },
     ],
     wardrobe: [
@@ -672,4 +917,43 @@ function buildSeed() {
   };
 }
 
-module.exports = { buildSeed };
+/**
+ * Move seeded marketing catalog into Home products (display) and drop inventory
+ * rows that were imported from those fakes — real floor stock stays.
+ */
+function ensureFakeCatalogMovedToHome(db) {
+  if (!Array.isArray(db.products)) db.products = [];
+  if (!Array.isArray(db.inventoryItems)) db.inventoryItems = [];
+  let changed = false;
+  const seedIds = new Set(SEED_CATALOG_IDS);
+
+  db.products.forEach((product) => {
+    if (!product || !seedIds.has(product.id)) return;
+    if (product.productKind !== "display") {
+      product.productKind = "display";
+      changed = true;
+    }
+    // Keep homepage featured picks visible after the move.
+    if (product.featured == null) {
+      product.featured = true;
+      changed = true;
+    }
+  });
+
+  const before = db.inventoryItems.length;
+  db.inventoryItems = db.inventoryItems.filter((item) => {
+    if (!item || !item.sourceProductId) return true;
+    return !seedIds.has(item.sourceProductId);
+  });
+  if (db.inventoryItems.length !== before) changed = true;
+
+  return changed;
+}
+
+module.exports = {
+  buildSeed,
+  ensureIconCategoryProducts,
+  ensureFakeCatalogMovedToHome,
+  iconCategoryProducts,
+  SEED_CATALOG_IDS,
+};

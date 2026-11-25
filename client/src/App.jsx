@@ -30,11 +30,8 @@ function RequireAdmin({ children }) {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <Loading />;
-  if (!user) {
-    const next = `${location.pathname}${location.search}${location.hash}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
-  }
-  if (user.role !== "admin") return <Navigate to="/" replace />;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (user.role !== "admin" && user.role !== "superadmin") return <Navigate to="/" replace />;
   return children;
 }
 

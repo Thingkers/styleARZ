@@ -13,15 +13,72 @@ const IMAGE_TYPES = {
 };
 const IMAGE_URL_PREFIX = "/uploads/inventory/";
 
-const DEFAULT_CATEGORIES = [
-  "Shirts",
-  "Knitwear",
-  "Trousers",
-  "Outerwear",
-  "Dresses",
-  "Sets",
-  "Accessories",
-];
+const AUDIENCES = ["Men", "Women", "Children", "Unisex"];
+
+/** Hard rules — never allow meaningless pairings (e.g. Saree+Men, Panjabi+Women). */
+const CATEGORY_AUDIENCE_RULES = {
+  Saree: ["Women"],
+  Sharee: ["Women"],
+  Panjabi: ["Men", "Children"],
+  Punjabi: ["Men", "Children"],
+  Dress: ["Women", "Children"],
+  Dresses: ["Women", "Children"],
+  Jeans: ["Men", "Women", "Children", "Unisex"],
+  Shirt: ["Men", "Women", "Children", "Unisex"],
+  Shirts: ["Men", "Women", "Children", "Unisex"],
+  "T-Shirt": ["Men", "Women", "Children", "Unisex"],
+  "T-Shirts": ["Men", "Women", "Children", "Unisex"],
+  Knitwear: ["Men", "Women", "Children", "Unisex"],
+  Trousers: ["Men", "Women", "Children", "Unisex"],
+  Outerwear: ["Men", "Women", "Children", "Unisex"],
+  Sets: ["Children", "Unisex"],
+  Accessories: ["Men", "Women", "Children", "Unisex"],
+};
+
+const DEFAULT_CATEGORY_AUDIENCES = CATEGORY_AUDIENCE_RULES;
+
+const DEFAULT_CATEGORIES = Object.keys(DEFAULT_CATEGORY_AUDIENCES).map((name) => ({
+  name,
+  audiences: DEFAULT_CATEGORY_AUDIENCES[name].slice(),
+}));
+
+function allowedAudiencesForCategory(name) {
+  const clean = text(name, 60);
+  const direct = CATEGORY_AUDIENCE_RULES[clean];
+  if (direct) return direct.slice();
+  const lower = clean.toLowerCase();
+  const match = Object.keys(CATEGORY_AUDIENCE_RULES).find((key) => key.toLowerCase() === lower);
+  return match ? CATEGORY_AUDIENCE_RULES[match].slice() : AUDIENCES.slice();
+}
+
+function normalizeAudiences(value, categoryNameHint) {
+  const list = Array.isArray(value) ? value : [];
+  const cleaned = [...new Set(list.map((entry) => text(entry, 20)).filter((entry) => AUDIENCES.includes(entry)))];
+  const allowed = allowedAudiencesForCategory(categoryNameHint || "");
+  const clipped = cleaned.filter((entry) => allowed.includes(entry));
+  if (clipped.length) return clipped;
+  return allowed.slice();
+}
+
+function normalizeCategoryRecord(entry) {
+  if (entry && typeof entry === "object" && entry.name) {
+    const name = text(entry.name, 60);
+    return {
+      name,
+      audiences: normalizeAudiences(entry.audiences, name),
+    };
+  }
+  const name = text(entry, 60);
+  return {
+    name,
+    audiences: allowedAudiencesForCategory(name),
+  };
+}
+
+function categoryName(entry) {
+  if (entry && typeof entry === "object") return String(entry.name || "").trim();
+  return String(entry || "").trim();
+}
 
 function httpError(status, message, extra) {
   return Object.assign(new Error(message), { status, ...(extra || {}) });
@@ -30,19 +87,34 @@ function httpError(status, message, extra) {
 // Adds retail/POS collections to older databases. Returns true when something changed.
 function ensureCollections(db) {
   let changed = false;
-  ["inventoryItems", "posSessions", "posScanEvents", "posSales", "inventoryDeleted"].forEach((key) => {
+  ["inventoryItems", "posSessions", "posScanEvents", "posSales", "posSalesDeleted", "inventoryDeleted", "offerCampaigns", "offerCustomers"].forEach((key) => {
     if (!Array.isArray(db[key])) {
       db[key] = [];
       changed = true;
     }
   });
+  if (!db.settings || typeof db.settings !== "object") {
+    db.settings = { smsSenderPhone: "" };
+    changed = true;
+  } else if (db.settings.smsSenderPhone === undefined) {
+    db.settings.smsSenderPhone = "";
+    changed = true;
+  }
   if (!Number.isFinite(db.inventorySeq)) {
     db.inventorySeq = 1000;
     changed = true;
   }
   if (!Array.isArray(db.inventoryCategories) || !db.inventoryCategories.length) {
-    db.inventoryCategories = DEFAULT_CATEGORIES.slice();
+    db.inventoryCategories = DEFAULT_CATEGORIES.map((entry) => ({
+      name: entry.name,
+      audiences: entry.audiences.slice(),
+    }));
     changed = true;
+  } else {
+    const normalized = db.inventoryCategories.map(normalizeCategoryRecord).filter((entry) => entry.name.length >= 2);
+    const before = JSON.stringify(db.inventoryCategories);
+    db.inventoryCategories = normalized;
+    if (JSON.stringify(db.inventoryCategories) !== before) changed = true;
   }
   return changed;
 }
@@ -83,13 +155,24 @@ function findById(db, id) {
   return (db.inventoryItems || []).find((item) => item.id === id) || null;
 }
 
-function assertUnique(db, field, value, selfId) {
+function assertUnique(db, field, value, selfId, options = {}) {
   if (!value) return;
   const wanted = String(value).toUpperCase();
   const clash = db.inventoryItems.find(
     (item) => item.id !== selfId && String(item[field] || "").toUpperCase() === wanted
   );
   if (clash) throw httpError(409, `Another item already uses that ${field}.`);
+  if (field === "barcode" && !options.allowLabelDraft) {
+    const draftClash = (db.labelDrafts || []).find(
+      (draft) =>
+        draft &&
+        draft.status !== "converted" &&
+        String(draft.barcode || "").toUpperCase() === wanted
+    );
+    if (draftClash) {
+      throw httpError(409, "That barcode belongs to a Quick Label draft. Convert the label instead.");
+    }
+  }
 }
 
 function createItem(db, input = {}) {
@@ -103,7 +186,7 @@ function createItem(db, input = {}) {
   let barcode = "";
   if (input.barcode) {
     barcode = cleanBarcode(input.barcode);
-    assertUnique(db, "barcode", barcode);
+    assertUnique(db, "barcode", barcode, undefined, { allowLabelDraft: Boolean(input.fromLabelDraft) });
   } else {
     barcode = allocateBarcode(db);
   }
@@ -112,19 +195,29 @@ function createItem(db, input = {}) {
   assertUnique(db, "sku", sku);
 
   const now = new Date().toISOString();
+  const category = text(input.category, 60);
+  const audienceRaw = text(input.audience, 20);
+  const audience = AUDIENCES.includes(audienceRaw) ? audienceRaw : "Unisex";
+  if (category) assertAudienceAllowed(category, audience);
+  const id = newId();
+  const primaryImage = typeof input.image === "string" ? text(input.image, 200) : "";
+  const images = normalizeImages(input.images, primaryImage);
   const item = {
-    id: newId(),
+    id,
+    styleId: text(input.styleId, 40) || id,
     sku,
     barcode,
     name,
     color: text(input.color, 40),
     colorHex: text(input.colorHex, 20) || "",
     size: text(input.size, 20),
-    category: text(input.category, 60),
+    category,
+    audience,
     price,
     cost,
     stock,
-    image: typeof input.image === "string" ? text(input.image, 200) : "",
+    image: images[0] || "",
+    images,
     notes: text(input.notes, 400),
     listed: input.listed === false ? false : true,
     featured: Boolean(input.featured),
@@ -137,33 +230,29 @@ function createItem(db, input = {}) {
   return item;
 }
 
-function createItems(db, inputs, image, uploadsDir) {
-  ensureCollections(db);
-  if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 100) {
-    throw httpError(400, "Create between 1 and 100 inventory items at a time.");
-  }
+function normalizeImages(images, primary = "") {
+  const list = Array.isArray(images)
+    ? images.map((entry) => text(entry, 240)).filter(Boolean)
+    : [];
+  if (primary && !list.includes(primary)) list.unshift(text(primary, 240));
+  return [...new Set(list)];
+}
 
-  const previousItems = db.inventoryItems.slice();
-  const previousSeq = db.inventorySeq;
-  const created = [];
-  const savedImages = [];
-  try {
-    for (const input of inputs) {
-      const item = createItem(db, input);
-      if (image !== undefined) {
-        item.image = saveImageFromBase64(uploadsDir, item.id, image);
-        item.updatedAt = new Date().toISOString();
-        savedImages.push(item.image);
-      }
-      created.push(item);
-    }
-    return created;
-  } catch (err) {
-    db.inventoryItems = previousItems;
-    db.inventorySeq = previousSeq;
-    savedImages.forEach((imagePath) => removeImageFile(uploadsDir, imagePath));
-    throw err;
-  }
+function itemImages(item) {
+  if (!item) return [];
+  return normalizeImages(item.images, item.image || "");
+}
+
+function syncItemImages(item, images) {
+  const next = normalizeImages(images, "");
+  item.images = next;
+  item.image = next[0] || "";
+  return item;
+}
+
+function styleKey(item) {
+  if (item.styleId) return `style:${item.styleId}`;
+  return `legacy:${item.name}|${item.color || ""}|${item.category || ""}`;
 }
 
 function addSizes(db, id, sizesInput, options = {}) {
@@ -190,18 +279,23 @@ function addSizes(db, id, sizesInput, options = {}) {
       skipped.push(size);
       continue;
     }
+    if (!parent.styleId) parent.styleId = parent.id;
     const item = createItem(db, {
       name: parent.name,
       color: parent.color,
       colorHex: parent.colorHex,
       size,
       category: parent.category,
+      audience: parent.audience || "Unisex",
       price: parent.price,
       cost: parent.cost,
       stock,
       notes: parent.notes,
       image: parent.image || "",
+      images: itemImages(parent),
+      styleId: parent.styleId || parent.id,
       listed: parent.listed !== false,
+      featured: Boolean(parent.featured),
     });
     created.push(item);
   }
@@ -210,30 +304,69 @@ function addSizes(db, id, sizesInput, options = {}) {
 }
 
 function toShopProduct(item) {
-  const colorName = item.color || "Default";
-  const hex = item.colorHex && /^#[0-9a-fA-F]{3,8}$/.test(item.colorHex) ? item.colorHex : "#4e4e4e";
+  return toGroupedShopProduct([item]);
+}
+
+/** One shop card per style (name/colour), with all sizes aggregated. */
+function toGroupedShopProduct(items) {
+  const sorted = (items || []).slice().sort((a, b) => {
+    const ao = Number.isFinite(a.sortOrder) ? a.sortOrder : 9999;
+    const bo = Number.isFinite(b.sortOrder) ? b.sortOrder : 9999;
+    if (ao !== bo) return ao - bo;
+    return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+  });
+  const primary = sorted[0];
+  if (!primary) return null;
+  const styleId = primary.styleId || primary.id;
+  const sizeStock = {};
+  const variantIds = {};
+  const sizes = [];
+  sorted.forEach((item) => {
+    const size = item.size || "One";
+    if (!variantIds[size]) {
+      sizes.push(size);
+      variantIds[size] = item.id;
+      sizeStock[size] = 0;
+    }
+    sizeStock[size] += Number(item.stock) || 0;
+  });
+  const images = [];
+  const seen = new Set();
+  sorted.forEach((item) => {
+    itemImages(item).forEach((src) => {
+      if (!seen.has(src)) {
+        seen.add(src);
+        images.push(src);
+      }
+    });
+  });
+  const stock = Object.values(sizeStock).reduce((sum, value) => sum + value, 0);
+  const colorName = primary.color || "Default";
+  const hex = primary.colorHex && /^#[0-9a-fA-F]{3,8}$/.test(primary.colorHex) ? primary.colorHex : "#4e4e4e";
   return {
-    id: item.id,
-    name: item.name,
-    audience: "Unisex",
-    category: item.category || "Retail",
+    id: styleId,
+    name: primary.name,
+    audience: AUDIENCES.includes(primary.audience) ? primary.audience : "Unisex",
+    category: primary.category || "Retail",
     slot: "other",
-    price: item.price,
-    stock: item.stock,
-    featured: Boolean(item.featured),
+    price: primary.price,
+    stock,
+    sizeStock,
+    variantIds,
+    featured: sorted.some((item) => item.featured),
     grade: "A",
-    sizes: item.size ? [item.size] : ["One"],
+    sizes: sizes.length ? sizes : ["One"],
     colors: [{ name: colorName, hex }],
     occasions: ["Everyday"],
-    image: item.image || "/images/studio-table.jpg",
-    description: item.notes || `${item.name} from the StyleARZ floor — also available in store.`,
+    image: images[0] || "/images/studio-table.jpg",
+    images: images.length ? images : ["/images/studio-table.jpg"],
+    description: primary.notes || `${primary.name} from the StyleARZ floor — also available in store.`,
     details: [
-      item.barcode ? `Barcode ${item.barcode}` : null,
-      item.size ? `Size ${item.size}` : null,
-      item.color ? `Colour ${item.color}` : null,
+      sizes.length > 1 ? `Sizes ${sizes.join(", ")}` : sizes[0] ? `Size ${sizes[0]}` : null,
+      primary.color ? `Colour ${primary.color}` : null,
     ].filter(Boolean),
     source: "inventory",
-    sortOrder: Number.isFinite(item.sortOrder) ? item.sortOrder : 9999,
+    sortOrder: Number.isFinite(primary.sortOrder) ? primary.sortOrder : 9999,
   };
 }
 
@@ -293,21 +426,44 @@ function setCatalogOrder(db, ids, featuredById) {
       }
     }
   });
-  return shopCatalog(db);
+  return shopCatalog(db, { kind: "all" });
 }
 
-function shopCatalog(db) {
+function productKindOf(product) {
+  return product && product.productKind === "display" ? "display" : "sellable";
+}
+
+function shopCatalog(db, options = {}) {
   ensureCollections(db);
   ensureSortOrders(db);
-  const retail = db.inventoryItems.filter((item) => item.listed !== false).map(toShopProduct);
-  const catalog = [
+  const kind = options.kind; // "sellable" | "display" | "all" | undefined
+  const listed = db.inventoryItems.filter((item) => item.listed !== false);
+  const groups = new Map();
+  listed.forEach((item) => {
+    const key = styleKey(item);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const retail = [...groups.values()].map(toGroupedShopProduct).filter(Boolean);
+  let catalog = [
     ...(db.products || []).map((product) => ({
       ...product,
+      images: normalizeImages(product.images, product.image || ""),
+      image: product.image || (Array.isArray(product.images) && product.images[0]) || "/images/studio-table.jpg",
+      productKind: productKindOf(product),
       source: product.source || "shop",
       sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 9999,
     })),
-    ...retail,
+    ...retail.map((product) => ({ ...product, productKind: "sellable" })),
   ];
+  if (kind === "display") {
+    catalog = catalog.filter((product) => productKindOf(product) === "display");
+  } else if (kind === "sellable") {
+    catalog = catalog.filter((product) => productKindOf(product) !== "display");
+  } else if (kind !== "all") {
+    // Default public shop catalog: sellable only. Featured home can request kind=all or featured=1 with display.
+    catalog = catalog.filter((product) => productKindOf(product) !== "display");
+  }
   catalog.sort((a, b) => {
     const ao = Number.isFinite(a.sortOrder) ? a.sortOrder : 9999;
     const bo = Number.isFinite(b.sortOrder) ? b.sortOrder : 9999;
@@ -319,53 +475,117 @@ function shopCatalog(db) {
 
 function findShopProduct(db, id) {
   const product = (db.products || []).find((entry) => entry.id === id);
-  if (product) return { product, kind: "product" };
+  if (product) {
+    return {
+      product: {
+        ...product,
+        images: normalizeImages(product.images, product.image || ""),
+        image: product.image || (Array.isArray(product.images) && product.images[0]) || "/images/studio-table.jpg",
+      },
+      kind: "product",
+    };
+  }
+  const listed = db.inventoryItems.filter((item) => item.listed !== false);
+  const byStyle = listed.filter((item) => (item.styleId || item.id) === id);
+  if (byStyle.length) {
+    return { product: toGroupedShopProduct(byStyle), kind: "inventory", items: byStyle };
+  }
   const item = findById(db, id);
-  if (item && item.listed !== false) return { product: toShopProduct(item), kind: "inventory", item };
+  if (item && item.listed !== false) {
+    const group = listed.filter((entry) => styleKey(entry) === styleKey(item));
+    const items = group.length ? group : [item];
+    return { product: toGroupedShopProduct(items), kind: "inventory", items, item };
+  }
   return null;
+}
+
+/** Resolve the barcode-level inventory row for a shop style + size. */
+function resolveInventoryVariant(db, productId, size) {
+  const found = findShopProduct(db, productId);
+  if (!found || found.kind === "product") return null;
+  const want = String(size || "One");
+  const mappedId = found.product.variantIds && found.product.variantIds[want];
+  if (mappedId) return findById(db, mappedId);
+  return (found.items || []).find((entry) => (entry.size || "One") === want) || found.items?.[0] || null;
 }
 
 function listCategories(db) {
   ensureCollections(db);
-  return db.inventoryCategories.slice().sort((a, b) => a.localeCompare(b));
+  return db.inventoryCategories
+    .map(normalizeCategoryRecord)
+    .filter((entry) => entry.name.length >= 2)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function addCategory(db, name) {
+function findCategoryIndex(db, name) {
+  const current = text(name, 60).toLowerCase();
+  return db.inventoryCategories.findIndex((entry) => categoryName(entry).toLowerCase() === current);
+}
+
+function assertAudienceAllowed(category, audience) {
+  const allowed = allowedAudiencesForCategory(category);
+  if (!allowed.includes(audience)) {
+    throw httpError(
+      400,
+      `“${category}” cannot be assigned to ${audience}. Allowed: ${allowed.join(", ")}.`
+    );
+  }
+}
+
+function addCategory(db, name, audiences) {
   ensureCollections(db);
   const clean = text(name, 60);
   if (clean.length < 2) throw httpError(400, "Enter a category name.");
-  if (db.inventoryCategories.some((entry) => entry.toLowerCase() === clean.toLowerCase())) {
-    throw httpError(409, "That category already exists.");
-  }
-  db.inventoryCategories.push(clean);
-  return clean;
+  if (findCategoryIndex(db, clean) >= 0) throw httpError(409, "That category already exists.");
+  const category = {
+    name: clean,
+    audiences: normalizeAudiences(audiences || allowedAudiencesForCategory(clean), clean),
+  };
+  db.inventoryCategories.push(category);
+  return category;
 }
 
-function renameCategory(db, from, to) {
+function renameCategory(db, from, to, audiences) {
   ensureCollections(db);
   const current = text(from, 60);
-  const next = text(to, 60);
+  const next = text(to || from, 60);
   if (next.length < 2) throw httpError(400, "Enter a category name.");
-  const index = db.inventoryCategories.findIndex((entry) => entry.toLowerCase() === current.toLowerCase());
+  const index = findCategoryIndex(db, current);
   if (index < 0) throw httpError(404, "Category not found.");
-  if (db.inventoryCategories.some((entry, i) => i !== index && entry.toLowerCase() === next.toLowerCase())) {
+  if (
+    db.inventoryCategories.some(
+      (entry, i) => i !== index && categoryName(entry).toLowerCase() === next.toLowerCase()
+    )
+  ) {
     throw httpError(409, "That category already exists.");
   }
-  const previous = db.inventoryCategories[index];
-  db.inventoryCategories[index] = next;
-  db.inventoryItems.forEach((item) => {
-    if (item.category === previous) item.category = next;
-  });
-  return next;
+  const previous = categoryName(db.inventoryCategories[index]);
+  const existing = normalizeCategoryRecord(db.inventoryCategories[index]);
+  const category = {
+    name: next,
+    audiences:
+      audiences !== undefined
+        ? normalizeAudiences(audiences, next)
+        : normalizeAudiences(existing.audiences, next),
+  };
+  db.inventoryCategories[index] = category;
+  if (previous !== next) {
+    db.inventoryItems.forEach((item) => {
+      if (item.category === previous) item.category = next;
+    });
+    (db.products || []).forEach((product) => {
+      if (product.category === previous) product.category = next;
+    });
+  }
+  return category;
 }
 
 function removeCategory(db, name) {
   ensureCollections(db);
-  const current = text(name, 60);
-  const index = db.inventoryCategories.findIndex((entry) => entry.toLowerCase() === current.toLowerCase());
+  const index = findCategoryIndex(db, name);
   if (index < 0) throw httpError(404, "Category not found.");
   const [removed] = db.inventoryCategories.splice(index, 1);
-  return removed;
+  return normalizeCategoryRecord(removed);
 }
 
 function updateItem(db, id, patch = {}) {
@@ -388,6 +608,15 @@ function updateItem(db, id, patch = {}) {
   if (patch.colorHex !== undefined) next.colorHex = text(patch.colorHex, 20);
   if (patch.size !== undefined) next.size = text(patch.size, 20);
   if (patch.category !== undefined) next.category = text(patch.category, 60);
+  if (patch.audience !== undefined) {
+    const audience = text(patch.audience, 20);
+    next.audience = AUDIENCES.includes(audience) ? audience : "Unisex";
+  }
+  const nextCategory = next.category !== undefined ? next.category : item.category;
+  const nextAudience = next.audience !== undefined ? next.audience : item.audience || "Unisex";
+  if (nextCategory && (patch.category !== undefined || patch.audience !== undefined)) {
+    assertAudienceAllowed(nextCategory, nextAudience);
+  }
   if (patch.notes !== undefined) next.notes = text(patch.notes, 400);
   if (patch.listed !== undefined) next.listed = Boolean(patch.listed);
   if (patch.featured !== undefined) next.featured = Boolean(patch.featured);
@@ -435,7 +664,34 @@ function deleteItem(db, id, uploadsDir) {
   const [item] = db.inventoryItems.splice(index, 1);
   db.inventoryDeleted.push({ id: item.id, barcode: item.barcode, deletedAt: new Date().toISOString() });
   if (db.inventoryDeleted.length > 500) db.inventoryDeleted = db.inventoryDeleted.slice(-500);
-  if (uploadsDir) removeImageFile(uploadsDir, item.image);
+  if (uploadsDir) itemImages(item).forEach((src) => removeImageFile(uploadsDir, src));
+  return item;
+}
+
+function appendItemImage(db, id, uploadsDir, dataUrl) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const url = saveImageFromBase64(uploadsDir, item.id, dataUrl);
+  const images = itemImages(item);
+  if (images.length >= 8) throw httpError(400, "You can add up to 8 photos per item.");
+  images.push(url);
+  syncItemImages(item, images);
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
+  return item;
+}
+
+function removeItemImageAt(db, id, uploadsDir, index) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const images = itemImages(item);
+  const at = Number(index);
+  if (!Number.isInteger(at) || at < 0 || at >= images.length) throw httpError(400, "Photo not found.");
+  const [removed] = images.splice(at, 1);
+  syncItemImages(item, images);
+  if (uploadsDir) removeImageFile(uploadsDir, removed);
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
   return item;
 }
 
@@ -447,8 +703,8 @@ function sniffImage(buffer) {
   return null;
 }
 
-// Writes the image to <uploadsDir>/inventory and returns its public path.
-function saveImageFromBase64(uploadsDir, itemId, dataUrl) {
+// Writes the image to <uploadsDir>/<folder> and returns its public path.
+function saveImageFromBase64(uploadsDir, itemId, dataUrl, folder = "inventory") {
   const match = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(String(dataUrl || ""));
   if (!match) throw httpError(400, "Send the image as a base64 data URL.");
   if (!IMAGE_TYPES[match[1].toLowerCase()]) throw httpError(400, "Use a PNG, JPEG, WebP or GIF image.");
@@ -460,11 +716,65 @@ function saveImageFromBase64(uploadsDir, itemId, dataUrl) {
 
   const safeId = String(itemId).replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeId) throw httpError(400, "Invalid item.");
-  const dir = path.join(uploadsDir, "inventory");
+  const safeFolder = folder === "home" ? "home" : folder === "offers" ? "offers" : "inventory";
+  const dir = path.join(uploadsDir, safeFolder);
   fs.mkdirSync(dir, { recursive: true });
   const name = `${safeId}-${Date.now().toString(36)}.${ext}`;
   fs.writeFileSync(path.join(dir, name), buffer);
-  return `${IMAGE_URL_PREFIX}${name}`;
+  return `/uploads/${safeFolder}/${name}`;
+}
+
+function createDisplayProduct(db, input = {}, uploadsDir) {
+  ensureCollections(db);
+  const name = text(input.name, 80);
+  if (name.length < 2) throw httpError(400, "Enter a name for this home image.");
+  const audience = AUDIENCES.includes(input.audience) ? input.audience : "Unisex";
+  const id = `disp_${crypto.randomBytes(4).toString("hex")}`;
+  let image = typeof input.image === "string" && !String(input.image).startsWith("data:") ? text(input.image, 240) : "";
+  if (typeof input.image === "string" && input.image.startsWith("data:") && uploadsDir) {
+    image = saveImageFromBase64(uploadsDir, id, input.image, "home");
+  }
+  if (!image) throw httpError(400, "Add a photo for this home product.");
+  const product = {
+    id,
+    name,
+    audience,
+    category: text(input.category, 40) || "Look",
+    slot: "other",
+    price: 0,
+    stock: 0,
+    featured: input.featured !== false,
+    grade: "A",
+    sizes: ["One"],
+    colors: [],
+    occasions: ["Everyday"],
+    image,
+    description: text(input.description, 400) || "Homepage look — image only, not sold from inventory.",
+    details: ["Homepage display", "Not imported to inventory"],
+    productKind: "display",
+    source: "shop",
+    sortOrder: nextSortOrder(db),
+  };
+  db.products.unshift(product);
+  return product;
+}
+
+function deleteDisplayProduct(db, id, uploadsDir) {
+  ensureCollections(db);
+  const index = db.products.findIndex((entry) => entry.id === id && productKindOf(entry) === "display");
+  if (index < 0) throw httpError(404, "Home product not found.");
+  const [product] = db.products.splice(index, 1);
+  if (uploadsDir && product.image && String(product.image).startsWith("/uploads/")) {
+    try {
+      const file = path.join(uploadsDir, "..", product.image.replace(/^\//, "").replace(/^uploads\//, ""));
+      // path: uploadsDir is .../uploads, image is /uploads/home/x.jpg
+      const absolute = path.join(uploadsDir, product.image.replace(/^\/uploads\//, ""));
+      if (fs.existsSync(absolute)) fs.unlinkSync(absolute);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { product };
 }
 
 function listItems(db, options = {}) {
@@ -496,6 +806,11 @@ function importCatalogProducts(db) {
 
   for (const product of products) {
     if (!product || !product.id) continue;
+    // Home / image-only display products never become POS inventory.
+    if (productKindOf(product) === "display") {
+      skipped.push(product.id);
+      continue;
+    }
     const already = db.inventoryItems.some((item) => item.sourceProductId === product.id);
     if (already) {
       skipped.push(product.id);
@@ -540,6 +855,9 @@ module.exports = {
   IMAGE_URL_PREFIX,
   DEFAULT_CATEGORIES,
   httpError,
+  AUDIENCES,
+  CATEGORY_AUDIENCE_RULES,
+  allowedAudiencesForCategory,
   ensureCollections,
   createItem,
   createItems,
@@ -547,11 +865,17 @@ module.exports = {
   deleteItem,
   addSizes,
   toShopProduct,
+  toGroupedShopProduct,
   shopCatalog,
   ensureSortOrders,
   setCatalogOrder,
   nextSortOrder,
   findShopProduct,
+  resolveInventoryVariant,
+  itemImages,
+  syncItemImages,
+  appendItemImage,
+  removeItemImageAt,
   listCategories,
   addCategory,
   renameCategory,
@@ -562,4 +886,7 @@ module.exports = {
   removeImageFile,
   listItems,
   importCatalogProducts,
+  productKindOf,
+  createDisplayProduct,
+  deleteDisplayProduct,
 };

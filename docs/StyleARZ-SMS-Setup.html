@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>StyleARZ — SMS Setup Guide</title>
+  <style>
+    @page { size: A4; margin: 16mm 15mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.42;
+      color: #1a1a1a;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 20pt; margin: 0 0 6px; letter-spacing: -0.02em; }
+    h2 {
+      font-size: 12.5pt;
+      margin: 18px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1.5px solid #222;
+    }
+    h3 { font-size: 11pt; margin: 12px 0 5px; }
+    p, li { margin: 0 0 5px; }
+    ul, ol { padding-left: 1.2em; margin: 0 0 8px; }
+    .meta {
+      margin: 10px 0 14px;
+      font-size: 10pt;
+    }
+    .meta p {
+      margin: 0 0 3px;
+    }
+    .meta span.label {
+      display: inline-block;
+      width: 110px;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 6px 0 12px;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 5px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f2f2f2; font-weight: 600; }
+    pre {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-size: 9pt;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      margin: 6px 0 10px;
+    }
+    code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9pt; }
+    .warn {
+      background: #fff8e7;
+      border-left: 3px solid #e67e22;
+      padding: 7px 11px;
+      margin: 10px 0;
+      font-size: 9.5pt;
+    }
+    .ok {
+      background: #eef8f0;
+      border-left: 3px solid #1f7a45;
+      padding: 7px 11px;
+      margin: 10px 0;
+      font-size: 9.5pt;
+    }
+    .footer {
+      margin-top: 20px;
+      padding-top: 8px;
+      border-top: 1px solid #ccc;
+      font-size: 8.5pt;
+      color: #666;
+    }
+    .check li { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+  <h1>StyleARZ — SMS Setup Guide</h1>
+
+  <div class="meta">
+    <p><span class="label">For</span> Teammate carrying SMS gateway setup</p>
+    <p><span class="label">Site</span> stylearz.com · Admin (login required)</p>
+    <p><span class="label">Prepared by</span> Thingkers Intelligence</p>
+    <p><span class="label">Date</span> 23 November 2026</p>
+  </div>
+
+  <div class="ok">
+    <strong>Already built in the app:</strong> POS invoice SMS + Admin → Messages (bulk festive / offer blasts).
+    You only need to connect a live SMS gateway and save the sender number.
+  </div>
+
+  <h2>1. Your checklist</h2>
+  <ol class="check">
+    <li>Pick an SMS provider that can send to Bangladesh numbers (<code>01XXXXXXXXX</code>).</li>
+    <li>Add provider credentials in <strong>cPanel → Setup Node.js App → Environment variables</strong> (never commit secrets to git).</li>
+    <li>In the site: <strong>Admin → Settings</strong> → save the <strong>SMS sender mobile</strong> (balance account).</li>
+    <li><strong>Restart</strong> the Node.js application in cPanel.</li>
+    <li>Test: one POS invoice SMS, then Admin → Messages with a <strong>manual list of 1–2 phones</strong> before any full blast.</li>
+  </ol>
+
+  <h2>2. Where to click in Admin</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Screen</th>
+        <th>What to do</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Admin → Settings</strong></td>
+        <td>Save SMS sender mobile (<code>01XXXXXXXXX</code>)</td>
+      </tr>
+      <tr>
+        <td><strong>Admin → Messages</strong></td>
+        <td>Preview + send bulk SMS (inauguration guests / POS phones / manual list)</td>
+      </tr>
+      <tr>
+        <td><strong>POS → invoice</strong></td>
+        <td>Send one receipt SMS to a customer</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>3. Environment variables (cPanel)</h2>
+
+  <h3>Option A — Log only (safe until gateway is ready)</h3>
+  <pre>SMS_PROVIDER=log</pre>
+  <p>Writes messages to the server log. <strong>No real SMS</strong> is sent. Use this for dry-runs.</p>
+
+  <h3>Option B — HTTP SMS gateway (typical BD aggregators)</h3>
+  <pre>SMS_PROVIDER=http
+SMS_HTTP_URL=https://YOUR-GATEWAY/api/send
+SMS_HTTP_METHOD=POST
+SMS_HTTP_TOKEN=your_api_token_if_needed
+SMS_HTTP_SENDER=01XXXXXXXXX</pre>
+  <p>The app POSTs JSON similar to:</p>
+  <pre>{
+  "to": "017xxxxxxxx",
+  "phone": "017xxxxxxxx",
+  "message": "...",
+  "text": "...",
+  "from": "01XXXXXXXXX",
+  "sender": "01XXXXXXXXX"
+}</pre>
+  <p>If the provider uses different field names, share their API docs with Thingkers so we can map them.</p>
+
+  <h3>Option C — Twilio</h3>
+  <pre>SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxx
+TWILIO_FROM=+8801XXXXXXXXX</pre>
+  <p>Also save the same sender number in <strong>Admin → Settings</strong>.</p>
+
+  <h2>4. Bulk SMS audiences</h2>
+  <ul>
+    <li><strong>Inauguration guests</strong> — phones that claimed a Grand Opening slot</li>
+    <li><strong>POS customers</strong> — unique phones from completed POS sales</li>
+    <li><strong>Manual list</strong> — paste numbers for a one-off festive blast</li>
+  </ul>
+
+  <div class="warn">
+    <strong>Before a full send:</strong> always use <strong>Preview</strong>, then test a manual list of 1–2 phones.
+    Real SMS costs money. Keep festive copy under ~480 characters.
+  </div>
+
+  <h2>5. Done when…</h2>
+  <ul>
+    <li>Admin → Settings shows your sender number</li>
+    <li>Gateway is <code>http</code> or <code>twilio</code> (not stuck on <code>log</code> for production)</li>
+    <li>A test invoice SMS arrives on a real phone</li>
+    <li>A 1–2 number bulk send from Messages arrives</li>
+  </ul>
+
+  <div class="footer">
+    StyleARZ SMS Setup · Thingkers Intelligence · stylearz.com · Confidential for team use
+  </div>
+
+</body>
+</html>

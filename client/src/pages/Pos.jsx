@@ -12,6 +12,9 @@ import { flushOutbox, initOfflineCatalog, isNetworkError, queueSale, subscribeOu
 import { getShareOrigin } from "../pos/lanOrigin";
 import { createHostPeer } from "../pos/webrtc";
 import PrepareOffline from "../pos/PrepareOffline";
+import ProductSearch from "../pos/ProductSearch";
+import InvoicePanel from "../pos/InvoicePanel";
+import { OFFLINE_PHONE_LINK_ENABLED } from "../pos/features";
 
 function initialMode() {
   const saved = localStorage.getItem("sa-pos-mode");
@@ -23,7 +26,94 @@ function newClientId() {
   return globalThis.crypto?.randomUUID?.() || `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function ScannerPanel({ onBarcode, busy }) {
+/**
+ * USB barcode scanner (HID keyboard mode) listener.
+ *
+ * Works anywhere on the POS page — no pairing, no connector page.
+ * - Scanners type very fast (a few ms between keys) and usually end with Enter.
+ *   If Enter is missing, the code is submitted after a short pause.
+ * - Works even when the product search box is focused: the scan is intercepted,
+ *   added to the cart, and the characters are removed from the search box.
+ * - Ignored in number / tel / textarea / select fields (discount, customer phone).
+ */
+function useUsbScanner(onScan) {
+  const cbRef = useRef(onScan);
+  cbRef.current = onScan;
+
+  useEffect(() => {
+    let buffer = "";
+    let last = 0;
+    let timer;
+    let field = null; // text input that received the scanned characters
+
+    const clearField = () => {
+      if (!field) return;
+      const code = buffer;
+      const value = field.value || "";
+      const next = value.endsWith(code) ? value.slice(0, value.length - code.length) : value;
+      if (next !== value) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(field, next);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    };
+
+    const reset = () => {
+      buffer = "";
+      field = null;
+    };
+
+    const flush = () => {
+      clearTimeout(timer);
+      const code = buffer.trim();
+      if (code.length >= 4) {
+        clearField();
+        reset();
+        cbRef.current(code);
+      } else {
+        reset();
+      }
+    };
+
+    const onKey = (e) => {
+      const el = e.target;
+      const tag = el?.tagName;
+      const type = (el?.type || "").toLowerCase();
+      if (tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      if (tag === "INPUT" && (type === "number" || type === "tel" || type === "password")) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === "Enter") {
+        if (buffer.length >= 4) {
+          e.preventDefault();
+          e.stopPropagation(); // stop the search box / buttons from also reacting to this Enter
+          flush();
+        } else {
+          reset();
+        }
+        return;
+      }
+      if (e.key.length !== 1) return;
+
+      const now = Date.now();
+      if (now - last > 50) reset(); // humans type slowly, scanners type fast
+      last = now;
+      buffer += e.key;
+      field = tag === "INPUT" ? el : null;
+      clearTimeout(timer);
+      timer = setTimeout(flush, 120); // works even if the scanner sends no Enter
+    };
+
+    // capture phase so we see the keys before the focused input handles them
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      clearTimeout(timer);
+    };
+  }, []);
+}
+
+function ScannerPanel({ onBarcode, onPick, busy, cart, onOpenCart }) {
   const videoRef = useRef(null);
   const sessionRef = useRef(null);
   const callbackRef = useRef(onBarcode);
@@ -31,7 +121,6 @@ function ScannerPanel({ onBarcode, busy }) {
   const [cameraError, setCameraError] = useState("");
   const [scanHint, setScanHint] = useState("");
   const [capturing, setCapturing] = useState(false);
-  const [manual, setManual] = useState("");
   callbackRef.current = onBarcode;
 
   useEffect(() => {
@@ -84,16 +173,10 @@ function ScannerPanel({ onBarcode, busy }) {
     }
   }
 
-  function submit(event) {
-    event.preventDefault();
-    const barcode = manual.trim();
-    if (!barcode) return;
-    callbackRef.current(barcode);
-    setManual("");
-  }
-
   return (
     <section className="pos-scan-panel">
+      <ProductSearch onPick={onPick} busy={busy} autofocus />
+      <AddedItems cart={cart || []} onOpenCart={onOpenCart} />
       <div className={`pos-camera ${cameraOn ? "is-on" : ""}`}>
         <video ref={videoRef} muted playsInline aria-label="Barcode camera preview" />
         {!cameraOn && <p>Camera scanning is off</p>}
@@ -118,51 +201,180 @@ function ScannerPanel({ onBarcode, busy }) {
           {capturing ? "Reading…" : "Capture barcode"}
         </button>
       </div>
-      <form className="pos-manual" onSubmit={submit}>
-        <label>
-          Manual barcode
-          <input
-            value={manual}
-            onChange={(event) => setManual(event.target.value)}
-            placeholder="Type or paste barcode"
-            autoComplete="off"
-            inputMode="text"
-          />
-        </label>
-        <button className="btn solid pos-tap" type="submit" disabled={busy || !manual.trim()}>
-          Add item
-        </button>
-      </form>
     </section>
   );
 }
 
-function Cart({ cart, setQty, remove }) {
-  if (!cart.length) return <p className="pos-empty">Scan an item to begin this sale.</p>;
+function itemThumb(item) {
+  return item?.image || "/images/studio-table.jpg";
+}
+
+function availableStock(line) {
+  const raw = line?.stock;
+  const value = typeof raw === "string" ? Number.parseInt(raw, 10) : Number(raw);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function isBlockedLine(line) {
+  const stock = availableStock(line);
+  return stock < 1 || Number(line.qty) > stock;
+}
+
+function splitCart(cart) {
+  const ready = [];
+  const blocked = [];
+  (cart || []).forEach((line) => {
+    if (isBlockedLine(line)) blocked.push(line);
+    else ready.push(line);
+  });
+  return { ready, blocked };
+}
+
+function CartLine({ line, setQty, remove, blocked = false }) {
+  const stock = availableStock(line);
   return (
-    <ul className="pos-cart-list">
-      {cart.map((line) => (
-        <li key={line.itemId}>
-          <div>
-            <strong>{line.name}</strong>
-            <small>{[line.color, line.size, line.barcode].filter(Boolean).join(" · ")}</small>
-          </div>
-          <div className="pos-line-actions">
+    <li className={blocked ? "is-blocked" : ""}>
+      <img className="pos-cart-thumb" src={itemThumb(line)} alt="" width={56} height={56} loading="lazy" />
+      <div className="pos-cart-copy">
+        <strong>{line.name}</strong>
+        <small>{[line.color, line.size, line.sku, line.barcode].filter(Boolean).join(" · ")}</small>
+        <em>
+          {money(line.price)} each
+          {blocked
+            ? stock < 1
+              ? " · Out of stock"
+              : ` · Only ${stock} in stock (cart has ${line.qty})`
+            : ` · ${stock} in stock`}
+        </em>
+      </div>
+      <div className="pos-line-actions">
+        {!blocked && (
+          <>
             <button type="button" aria-label={`Decrease ${line.name}`} onClick={() => setQty(line.itemId, line.qty - 1)}>
               −
             </button>
             <b>{line.qty}</b>
-            <button type="button" aria-label={`Increase ${line.name}`} onClick={() => setQty(line.itemId, line.qty + 1)}>
+            <button
+              type="button"
+              aria-label={`Increase ${line.name}`}
+              disabled={line.qty >= stock}
+              onClick={() => setQty(line.itemId, line.qty + 1)}
+            >
               +
             </button>
             <strong>{money(line.price * line.qty)}</strong>
-            <button className="pos-remove" type="button" onClick={() => remove(line.itemId)}>
-              Remove
+          </>
+        )}
+        {blocked && stock > 0 && (
+          <>
+            <button type="button" aria-label={`Set ${line.name} quantity to stock`} onClick={() => setQty(line.itemId, stock)}>
+              Fix to {stock}
             </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+            <b>{line.qty}</b>
+          </>
+        )}
+        <button className="pos-remove" type="button" onClick={() => remove(line.itemId)}>
+          Remove
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function Cart({ cart, setQty, remove }) {
+  if (!cart.length) return <p className="pos-empty">Scan or search for an item to begin this sale.</p>;
+  const { ready, blocked } = splitCart(cart);
+  return (
+    <div className="pos-cart-sections">
+      <div className="pos-cart-section">
+        <h3>Ready to sell</h3>
+        {ready.length ? (
+          <ul className="pos-cart-list">
+            {ready.map((line) => (
+              <CartLine key={line.itemId} line={line} setQty={setQty} remove={remove} />
+            ))}
+          </ul>
+        ) : (
+          <p className="muted pos-cart-empty-note">No sellable items yet.</p>
+        )}
+      </div>
+      {blocked.length > 0 && (
+        <div className="pos-cart-section is-blocked">
+          <h3>Out of stock / not enough stock</h3>
+          <p className="muted">Remove these or lower qty before paying. They are not included in the sale total.</p>
+          <ul className="pos-cart-list">
+            {blocked.map((line) => (
+              <CartLine key={line.itemId} line={line} setQty={setQty} remove={remove} blocked />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddedItems({ cart, onOpenCart }) {
+  if (!cart.length) {
+    return (
+      <div className="pos-added-panel is-empty">
+        <p className="muted">No items in this sale yet. Search or scan to add.</p>
+      </div>
+    );
+  }
+  const { ready, blocked } = splitCart(cart);
+  const units = ready.reduce((sum, line) => sum + line.qty, 0);
+  return (
+    <section className="pos-added-panel" aria-live="polite">
+      <div className="pos-added-head">
+        <h2>In this sale</h2>
+        <span>
+          {ready.length} ready · {units} unit{units === 1 ? "" : "s"}
+          {blocked.length ? ` · ${blocked.length} blocked` : ""}
+        </span>
+        {onOpenCart && (
+          <button type="button" className="text-link" onClick={onOpenCart}>
+            Edit cart
+          </button>
+        )}
+      </div>
+      {ready.length > 0 && (
+        <ul className="pos-added-list">
+          {ready.map((line) => (
+            <li key={line.itemId}>
+              <img src={itemThumb(line)} alt="" width={52} height={52} loading="lazy" />
+              <div>
+                <strong>
+                  {line.qty} × {line.name}
+                </strong>
+                <small>{[line.color, line.size, line.barcode].filter(Boolean).join(" · ")} · stock {availableStock(line)}</small>
+              </div>
+              <b>{money(line.price * line.qty)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
+      {blocked.length > 0 && (
+        <>
+          <h3 className="pos-added-blocked-title">Out of stock</h3>
+          <ul className="pos-added-list is-blocked">
+            {blocked.map((line) => (
+              <li key={line.itemId}>
+                <img src={itemThumb(line)} alt="" width={52} height={52} loading="lazy" />
+                <div>
+                  <strong>{line.name}</strong>
+                  <small>
+                    {availableStock(line) < 1
+                      ? "Out of stock — cannot sell"
+                      : `Need ${line.qty}, only ${availableStock(line)} left`}
+                  </small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -179,6 +391,7 @@ function Pairing({
   onStartOffline,
   onAcceptAnswer,
   onStopOffline,
+  offlinePhoneLinkEnabled = false,
 }) {
   const offerQrRef = useRef(null);
   const answerVideoRef = useRef(null);
@@ -288,13 +501,16 @@ function Pairing({
           <h2>{session.code}</h2>
           <canvas ref={qrRef} aria-label={`QR code for session ${session.code}`} />
           <p className="pos-scan-url">
-            On the phone (same Wi‑Fi), open:
+            USB scanner: just plug it in and scan on this page. No pairing needed.
+          </p>
+          <p className="pos-scan-url">
+            Phone camera scanner:
             <br />
             <a href={scanUrl} target="_blank" rel="noreferrer">
               {scanUrl}
             </a>
           </p>
-          <p>Or scan the QR, or type the code at /pos/scan after signing in as admin on the phone.</p>
+          <p>Or scan the QR / type the code at /pos/scan after signing in as admin.</p>
           {/127\.0\.0\.1|localhost/.test(scanUrl) && (
             <p className="pos-webrtc-hint">
               Tip: open this POS page via your Mac’s LAN URL first (e.g. http://192.168.x.x:5173/pos) so the QR works on a phone.
@@ -302,99 +518,105 @@ function Pairing({
           )}
         </>
       ) : (
-        <p className="pos-webrtc-hint">Internet is offline. Use WebRTC pairing so a phone can still push scans.</p>
+        <p className="pos-webrtc-hint">
+          {offlinePhoneLinkEnabled
+            ? "Internet is offline. Use WebRTC pairing so a phone can still push scans."
+            : "Internet is offline. Reconnect to pair a phone scanner, or use this device only."}
+        </p>
       )}
-      <div className="pos-webrtc">
-        <div className="pos-webrtc-head">
-          <strong>Offline phone link</strong>
-          <span className={`pos-webrtc-status is-${webrtcStatus}`}>{webrtcStatus}</span>
-        </div>
-        {webrtcStatus === "idle" || webrtcStatus === "closed" || webrtcStatus === "failed" || webrtcStatus === "disconnected" ? (
-          <button className="btn solid pos-tap" type="button" onClick={onStartOffline}>
-            Start offline pair
-          </button>
-        ) : (
-          <>
-            {offerPayload && webrtcStatus !== "connected" && (
-              <div className="pos-pair-qr">
-                <p className="pos-webrtc-hint">Point the phone camera at this offer QR (Offline WebRTC → Scan offer QR).</p>
-                <canvas ref={offerQrRef} aria-label="Offer QR for the phone scanner" />
-              </div>
-            )}
-            {webrtcStatus !== "connected" && (
-              <div className="pos-pair-answer">
-                {!hasCamera && (
-                  <p className="pos-webrtc-hint">
-                    This computer has no camera. On the phone tap <strong>Copy answer</strong>, then paste it here and Connect.
-                  </p>
-                )}
-                <div className="pos-webrtc-actions">
-                  {hasCamera && (
-                    !scanningAnswer ? (
-                      <button className="btn solid pos-tap" type="button" onClick={startAnswerScan}>
-                        Scan answer QR
-                      </button>
-                    ) : (
-                      <button className="btn line light pos-tap" type="button" onClick={stopAnswerScan}>
-                        Stop answer scan
-                      </button>
-                    )
+      {offlinePhoneLinkEnabled ? (
+        <div className="pos-webrtc">
+          <div className="pos-webrtc-head">
+            <strong>Offline phone link</strong>
+            <span className={`pos-webrtc-status is-${webrtcStatus}`}>{webrtcStatus}</span>
+          </div>
+          {webrtcStatus === "idle" || webrtcStatus === "closed" || webrtcStatus === "failed" || webrtcStatus === "disconnected" ? (
+            <button className="btn solid pos-tap" type="button" onClick={onStartOffline}>
+              Start offline pair
+            </button>
+          ) : (
+            <>
+              {offerPayload && webrtcStatus !== "connected" && (
+                <div className="pos-pair-qr">
+                  <p className="pos-webrtc-hint">Point the phone camera at this offer QR (Offline WebRTC → Scan offer QR).</p>
+                  <canvas ref={offerQrRef} aria-label="Offer QR for the phone scanner" />
+                </div>
+              )}
+              {webrtcStatus !== "connected" && (
+                <div className="pos-pair-answer">
+                  {!hasCamera && (
+                    <p className="pos-webrtc-hint">
+                      This computer has no camera. On the phone tap <strong>Copy answer</strong>, then paste it here and Connect.
+                    </p>
                   )}
-                  <button
-                    className={hasCamera ? "btn line light pos-tap" : "btn solid pos-tap"}
-                    type="button"
-                    onClick={() => setShowText(true)}
-                  >
-                    Paste answer
-                  </button>
-                  {showText && hasCamera && (
-                    <button className="text-link" type="button" onClick={() => setShowText(false)}>
-                      Hide paste
+                  <div className="pos-webrtc-actions">
+                    {hasCamera && (
+                      !scanningAnswer ? (
+                        <button className="btn solid pos-tap" type="button" onClick={startAnswerScan}>
+                          Scan answer QR
+                        </button>
+                      ) : (
+                        <button className="btn line light pos-tap" type="button" onClick={stopAnswerScan}>
+                          Stop answer scan
+                        </button>
+                      )
+                    )}
+                    <button
+                      className={hasCamera ? "btn line light pos-tap" : "btn solid pos-tap"}
+                      type="button"
+                      onClick={() => setShowText(true)}
+                    >
+                      Paste answer
                     </button>
+                    {showText && hasCamera && (
+                      <button className="text-link" type="button" onClick={() => setShowText(false)}>
+                        Hide paste
+                      </button>
+                    )}
+                  </div>
+                  {scanningAnswer && (
+                    <div className="pos-pair-scan-camera">
+                      <video ref={answerVideoRef} muted playsInline aria-label="Scan answer QR from phone" />
+                    </div>
+                  )}
+                  {pairScanHint && <p className="notice">{pairScanHint}</p>}
+                  {pairScanError && <p className="error">{pairScanError}</p>}
+                  {(showText || !hasCamera) && (
+                    <>
+                      <label>
+                        Paste answer from phone
+                        <textarea
+                          value={answerDraft}
+                          rows={4}
+                          onChange={(e) => setAnswerDraft(e.target.value)}
+                          placeholder="Paste the answer the phone copied"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </label>
+                      <button className="btn solid pos-tap" type="button" disabled={!answerDraft.trim()} onClick={() => onAcceptAnswer()}>
+                        Connect phone
+                      </button>
+                      <details className="pos-pair-details">
+                        <summary>Offer text (rare fallback)</summary>
+                        {offerPayload && (
+                          <textarea readOnly value={offerPayload} rows={3} onFocus={(e) => e.target.select()} />
+                        )}
+                      </details>
+                    </>
                   )}
                 </div>
-                {scanningAnswer && (
-                  <div className="pos-pair-scan-camera">
-                    <video ref={answerVideoRef} muted playsInline aria-label="Scan answer QR from phone" />
-                  </div>
-                )}
-                {pairScanHint && <p className="notice">{pairScanHint}</p>}
-                {pairScanError && <p className="error">{pairScanError}</p>}
-                {(showText || !hasCamera) && (
-                  <>
-                    <label>
-                      Paste answer from phone
-                      <textarea
-                        value={answerDraft}
-                        rows={4}
-                        onChange={(e) => setAnswerDraft(e.target.value)}
-                        placeholder="Paste the answer the phone copied"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </label>
-                    <button className="btn solid pos-tap" type="button" disabled={!answerDraft.trim()} onClick={() => onAcceptAnswer()}>
-                      Connect phone
-                    </button>
-                    <details className="pos-pair-details">
-                      <summary>Offer text (rare fallback)</summary>
-                      {offerPayload && (
-                        <textarea readOnly value={offerPayload} rows={3} onFocus={(e) => e.target.select()} />
-                      )}
-                    </details>
-                  </>
-                )}
+              )}
+              <div className="pos-webrtc-actions">
+                <button className="btn line light pos-tap" type="button" onClick={onStopOffline}>
+                  Stop offline link
+                </button>
               </div>
-            )}
-            <div className="pos-webrtc-actions">
-              <button className="btn line light pos-tap" type="button" onClick={onStopOffline}>
-                Stop offline link
-              </button>
-            </div>
-            {webrtcStatus === "connected" && <p className="notice">Phone linked over WebRTC. Scans appear in the cart.</p>}
-          </>
-        )}
-      </div>
+              {webrtcStatus === "connected" && <p className="notice">Phone linked over WebRTC. Scans appear in the cart.</p>}
+            </>
+          )}
+        </div>
+      ) : null}
       <button className="btn line light pos-tap" type="button" onClick={onSolo}>
         Use this phone only
       </button>
@@ -410,6 +632,11 @@ export default function Pos() {
   const [tab, setTab] = useState("scan");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [discount, setDiscount] = useState("");
+  const [discountMode, setDiscountMode] = useState("amount"); // amount | percent
+  const [discountManual, setDiscountManual] = useState(false);
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [offerPreview, setOfferPreview] = useState(null);
+  const [lastSale, setLastSale] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -422,7 +649,7 @@ export default function Pos() {
   const [offerPayload, setOfferPayload] = useState("");
   const [answerDraft, setAnswerDraft] = useState("");
   const [scanUrl, setScanUrl] = useState("");
-  const [scanFlash, setScanFlash] = useState(null);
+  const [scanFlash, setScanFlash] = useState(null); // { name, detail, image }
   const qrRef = useRef(null);
   const creatingRef = useRef(false);
   const sessionRequestRef = useRef(0);
@@ -433,10 +660,56 @@ export default function Pos() {
   const flashTimerRef = useRef(0);
   const addingRef = useRef(false);
 
-  const cartCount = cart.reduce((sum, line) => sum + line.qty, 0);
-  const subtotal = cart.reduce((sum, line) => sum + line.price * line.qty, 0);
-  const discountNumber = Math.max(0, Number(discount) || 0);
+  const { ready: sellableCart, blocked: blockedCart } = splitCart(cart);
+  const cartCount = sellableCart.reduce((sum, line) => sum + line.qty, 0);
+  const subtotal = sellableCart.reduce((sum, line) => sum + line.price * line.qty, 0);
+  const discountInputNumber = Math.max(0, Number(discount) || 0);
+  const discountNumber =
+    discountMode === "percent"
+      ? Math.min(subtotal, Math.round(((subtotal * Math.min(100, discountInputNumber)) / 100) * 100) / 100)
+      : discountInputNumber;
+  const discountPercentValue = discountMode === "percent" ? Math.min(100, discountInputNumber) : null;
   const total = Math.max(0, subtotal - discountNumber);
+  const hasStockBlocks = blockedCart.length > 0;
+
+  function applyOfferDiscount(offer) {
+    const percent = Number(offer?.salePercent);
+    if (Number.isFinite(percent) && percent > 0) {
+      setDiscountMode("percent");
+      setDiscount(String(percent));
+      return;
+    }
+    const amount = Number(offer?.discountAmount);
+    if (Number.isFinite(amount) && amount > 0) {
+      setDiscountMode("amount");
+      setDiscount(String(amount));
+    }
+  }
+
+  useEffect(() => {
+    if (!online) {
+      setOfferPreview(null);
+      return undefined;
+    }
+    const phone = customerPhone.trim();
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams();
+      if (phone) query.set("phone", phone);
+      query.set("subtotal", String(subtotal));
+      api(`/api/pos/offers/preview?${query.toString()}`)
+        .then((data) => {
+          const offer = data.offer || null;
+          setOfferPreview(offer);
+          if (!discountManual && offer?.eligible && (Number(offer.salePercent) > 0 || Number(offer.discountAmount) > 0)) {
+            applyOfferDiscount(offer);
+          } else if (!discountManual && (!offer || !offer.eligible)) {
+            setDiscount("");
+          }
+        })
+        .catch(() => setOfferPreview(null));
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [customerPhone, subtotal, online, discountManual]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -583,16 +856,52 @@ export default function Pos() {
   const addItem = useCallback((item) => {
     if (!item || !item.id) return;
     rememberCatalogItems([item]);
+    const stock = availableStock(item);
+    const detail = [item.color, item.size, item.sku || item.barcode].filter(Boolean).join(" · ");
+
+    if (stock < 1) {
+      // Never add zero-stock items to the sale cart.
+      setError(`Out of stock — not added: ${item.name}${detail ? ` · ${detail}` : ""}.`);
+      setNotice("");
+      setScanFlash({
+        name: item.name,
+        detail: "Out of stock — not added",
+        image: itemThumb(item),
+      });
+      window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setScanFlash(null), 1400);
+      return;
+    }
+
+    setError("");
+    let blockedIncrease = false;
     setCart((current) => {
       const found = current.find((line) => line.itemId === item.id);
-      if (found) return current.map((line) => line.itemId === item.id ? { ...line, qty: line.qty + 1 } : line);
-      return [...current, { ...item, itemId: item.id, qty: 1 }];
+      if (found) {
+        if (found.qty >= stock) {
+          blockedIncrease = true;
+          return current.map((line) => (line.itemId === item.id ? { ...line, stock } : line));
+        }
+        return current.map((line) =>
+          line.itemId === item.id ? { ...line, ...item, itemId: item.id, stock, qty: line.qty + 1 } : line
+        );
+      }
+      return [...current, { ...item, itemId: item.id, qty: 1, stock }];
     });
-    const label = [item.name, item.size].filter(Boolean).join(" · ");
-    setNotice(`${label} added.`);
-    setScanFlash(label);
+
+    if (blockedIncrease) {
+      setError(`Only ${stock} in stock for ${item.name}. Cannot add more.`);
+      return;
+    }
+
+    setNotice(`${item.name}${detail ? ` · ${detail}` : ""} added · ${stock} in stock.`);
+    setScanFlash({
+      name: item.name,
+      detail: detail ? `${detail} · stock ${stock}` : `stock ${stock}`,
+      image: itemThumb(item),
+    });
     window.clearTimeout(flashTimerRef.current);
-    flashTimerRef.current = window.setTimeout(() => setScanFlash(null), 900);
+    flashTimerRef.current = window.setTimeout(() => setScanFlash(null), 1400);
     try {
       navigator.vibrate?.([30, 40, 30]);
     } catch {
@@ -623,6 +932,9 @@ export default function Pos() {
   }, [addItem]);
 
   addBarcodeRef.current = addBarcode;
+
+  // USB barcode scanner: scan anywhere on this page, the item goes straight to the cart.
+  useUsbScanner((code) => addBarcodeRef.current?.(code));
 
   async function startOfflinePair() {
     setError("");
@@ -689,9 +1001,18 @@ export default function Pos() {
         const result = await api(`/api/pos/sessions/${session.id}/events?since=${cursor}`);
         cursor = result.cursor;
         for (const event of result.events) {
-          const eventKey = event?.id ?? `${event?.type ?? "event"}-${event?.createdAt ?? event?.timestamp ?? "unknown"}`;
-          if (!eventKey || processedEventIdsRef.current.has(eventKey)) continue;
-          processedEventIdsRef.current.add(eventKey);
+          if (event.found === false || (!event.item && event.barcode)) {
+            setNotice("");
+            setError(`Not in database: ${event.barcode}`);
+            setScanFlash({
+              name: event.barcode,
+              detail: "Not in database",
+              image: "",
+            });
+            window.clearTimeout(flashTimerRef.current);
+            flashTimerRef.current = window.setTimeout(() => setScanFlash(null), 1600);
+            continue;
+          }
           if (event.item) addItem(event.item);
           else if (event.barcode) await addBarcode(event.barcode);
         }
@@ -710,25 +1031,75 @@ export default function Pos() {
   }, [mode, session, online, addItem, addBarcode]);
 
   function setQty(itemId, qty) {
-    if (qty < 1) setCart((current) => current.filter((line) => line.itemId !== itemId));
-    else setCart((current) => current.map((line) => line.itemId === itemId ? { ...line, qty: Math.max(1, qty) } : line));
+    setCart((current) => {
+      const line = current.find((entry) => entry.itemId === itemId);
+      if (!line) return current;
+      const stock = availableStock(line);
+      if (qty < 1) return current.filter((entry) => entry.itemId !== itemId);
+      if (qty > stock && stock >= 1) {
+        setError(`Only ${stock} in stock for ${line.name}.`);
+        return current.map((entry) => (entry.itemId === itemId ? { ...entry, qty: stock } : entry));
+      }
+      setError("");
+      return current.map((entry) => (entry.itemId === itemId ? { ...entry, qty } : entry));
+    });
   }
 
   async function completeSale() {
-    if (!cart.length || discountNumber > subtotal) return;
+    if (!sellableCart.length || discountNumber > subtotal || hasStockBlocks) return;
     setBusy(true);
     setError("");
     setNotice("");
     const clientId = newClientId();
     const createdAt = new Date().toISOString();
-    const saleItems = cart.map(({ itemId, qty }) => ({ itemId, qty }));
+    const phone = customerPhone.trim();
+    const saleLines = sellableCart;
 
     async function saveOffline() {
-      await queueSale({ clientId, items: cart, paymentMethod, discount: discountNumber, createdAt });
+      const offlineSale = {
+        id: `offline_${clientId}`,
+        receiptNo: `OFFLINE-${createdAt.slice(0, 10).replace(/-/g, "")}`,
+        clientId,
+        items: saleLines.map((line) => ({
+          itemId: line.itemId,
+          name: line.name,
+          color: line.color,
+          size: line.size,
+          barcode: line.barcode,
+          image: line.image,
+          price: line.price,
+          qty: line.qty,
+          lineTotal: line.price * line.qty,
+        })),
+        subtotal,
+        discount: discountNumber,
+        total,
+        paymentMethod,
+        customerPhone: phone,
+        createdAt,
+        source: "offline",
+      };
+      await queueSale({
+        clientId,
+        items: saleLines,
+        paymentMethod,
+        discount: discountNumber,
+        discountPercent: discountPercentValue,
+        customerPhone: phone,
+        createdAt,
+      });
       setCart([]);
       setDiscount("");
+      setDiscountMode("amount");
+      setDiscountManual(false);
+      setCustomerPhone("");
+      setOfferPreview(null);
       setTab("scan");
-      setNotice("Sale saved offline · will sync");
+      setLastSale({
+        ...offlineSale,
+        discountPercent: discountPercentValue,
+      });
+      setNotice("Sale saved offline · will sync. You can still print this invoice.");
     }
 
     try {
@@ -740,17 +1111,31 @@ export default function Pos() {
         method: "POST",
         body: {
           sessionId: session?.id,
-          items: saleItems,
+          items: saleLines.map(({ itemId, qty }) => ({ itemId, qty })),
           paymentMethod,
           clientId,
           discount: discountNumber,
+          discountPercent: discountPercentValue,
+          customerPhone: phone,
         },
       });
       setCart([]);
       setDiscount("");
+      setDiscountMode("amount");
+      setDiscountManual(false);
+      setCustomerPhone("");
+      setOfferPreview(null);
       setSession(null);
       setTab("scan");
-      setNotice(`Sale complete · ${result.sale.receiptNo}`);
+      setLastSale(result.sale);
+      const giftNote = result.sale.giftEligible ? " · hand over special gift" : "";
+      const offerNote =
+        result.sale.offerKind === "inaugural"
+          ? ` · inauguration #${result.sale.offerSlot} (${result.sale.offerPercent}%)`
+          : result.sale.offerKind === "lifetime"
+            ? ` · lifetime ${result.sale.lifetimePercent}%`
+            : "";
+      setNotice(`Sale complete · ${result.sale.receiptNo}${offerNote}${giftNote}`);
     } catch (requestError) {
       if (isNetworkError(requestError)) {
         try {
@@ -774,8 +1159,12 @@ export default function Pos() {
     <section className="pos-card">
       <div className="pos-section-title">
         <h2>Cart</h2>
-        <span>{cart.reduce((sum, line) => sum + line.qty, 0)} items</span>
+        <span>
+          {cartCount} sellable
+          {hasStockBlocks ? ` · ${blockedCart.length} blocked` : ""}
+        </span>
       </div>
+      {mode === "dual" && <ProductSearch onPick={addItem} busy={busy} />}
       <Cart cart={cart} setQty={setQty} remove={(itemId) => setCart((current) => current.filter((line) => line.itemId !== itemId))} />
     </section>
   );
@@ -783,25 +1172,118 @@ export default function Pos() {
   const payPanel = (
     <section className="pos-card pos-pay">
       <h2>Payment</h2>
+      {hasStockBlocks && (
+        <p className="error">
+          Remove or fix {blockedCart.length} out-of-stock item{blockedCart.length === 1 ? "" : "s"} in the cart before paying.
+        </p>
+      )}
       <label>
         Payment method
         <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
           <option value="cash">Cash</option>
           <option value="card">Card</option>
+          <option value="mobile">Mobile banking</option>
           <option value="other">Other</option>
         </select>
       </label>
       <label>
-        Discount
-        <input type="number" min="0" max={subtotal} value={discount} onChange={(event) => setDiscount(event.target.value)} />
+        Customer phone (for SMS + offers)
+        <input
+          value={customerPhone}
+          onChange={(event) => setCustomerPhone(event.target.value)}
+          placeholder="01XXXXXXXXX"
+          inputMode="tel"
+          autoComplete="tel"
+        />
       </label>
+      {offerPreview?.message ? (
+        <p className={`pos-offer-banner ${offerPreview.eligible ? "is-eligible" : ""}`} role="status">
+          {offerPreview.message}
+        </p>
+      ) : null}
+      {offerPreview?.giftEligible ? (
+        <p className="pos-gift-alert" role="status">
+          Special gift — hand over gift (৳{offerPreview.giftMinSubtotal || 5000}+)
+        </p>
+      ) : null}
+      <div className="pos-discount-field">
+        <div className="pos-discount-head">
+          <span>Discount</span>
+          <div className="pos-discount-mode" role="group" aria-label="Discount mode">
+            <button
+              type="button"
+              className={discountMode === "amount" ? "is-active" : ""}
+              onClick={() => {
+                setDiscountManual(true);
+                setDiscountMode("amount");
+                setDiscount(discountNumber ? String(discountNumber) : "");
+              }}
+            >
+              ৳
+            </button>
+            <button
+              type="button"
+              className={discountMode === "percent" ? "is-active" : ""}
+              onClick={() => {
+                setDiscountManual(true);
+                setDiscountMode("percent");
+                const pct =
+                  subtotal > 0 && discountNumber > 0
+                    ? Math.round((discountNumber / subtotal) * 1000) / 10
+                    : discountInputNumber;
+                setDiscount(pct ? String(pct) : "");
+              }}
+            >
+              %
+            </button>
+          </div>
+        </div>
+        <input
+          type="number"
+          min="0"
+          max={discountMode === "percent" ? 100 : subtotal}
+          step={discountMode === "percent" ? "0.1" : "1"}
+          value={discount}
+          onChange={(event) => {
+            setDiscountManual(true);
+            setDiscount(event.target.value);
+          }}
+          placeholder={discountMode === "percent" ? "e.g. 15" : "e.g. 500"}
+        />
+        {discountMode === "percent" && discountInputNumber > 0 ? (
+          <small className="pos-discount-hint">= {money(discountNumber)} off</small>
+        ) : null}
+      </div>
+      {discountManual && offerPreview?.eligible ? (
+        <button
+          className="text-link"
+          type="button"
+          onClick={() => {
+            setDiscountManual(false);
+            applyOfferDiscount(offerPreview);
+          }}
+        >
+          Reset to offer discount
+          {offerPreview.salePercent
+            ? ` (${offerPreview.salePercent}% · ${money(offerPreview.discountAmount || 0)})`
+            : ` (${money(offerPreview.discountAmount || 0)})`}
+        </button>
+      ) : null}
       <div className="pos-totals">
         <p><span>Subtotal</span><strong>{money(subtotal)}</strong></p>
-        <p><span>Discount</span><strong>−{money(discountNumber)}</strong></p>
+        <p>
+          <span>Discount{discountPercentValue != null && discountPercentValue > 0 ? ` (${discountPercentValue}%)` : ""}</span>
+          <strong>−{money(discountNumber)}</strong>
+        </p>
         <p className="pos-total"><span>Total</span><strong>{money(total)}</strong></p>
       </div>
       {discountNumber > subtotal && <p className="error">Discount cannot exceed the subtotal.</p>}
-      <button className="btn solid pos-complete" type="button" disabled={busy || !cart.length || discountNumber > subtotal} onClick={completeSale}>
+      <button
+        className="btn solid pos-complete"
+        type="button"
+        disabled={busy || !sellableCart.length || hasStockBlocks || discountNumber > subtotal}
+        onClick={completeSale}
+      >
         {busy ? "Processing…" : "Complete sale"}
       </button>
     </section>
@@ -811,13 +1293,21 @@ export default function Pos() {
     <div className={`pos-shell ${scanFlash ? "is-scan-flash" : ""}`}>
       {scanFlash && (
         <div className="pos-scan-flash" role="status" aria-live="polite">
-          <p>Scanned</p>
-          <strong>{scanFlash}</strong>
+          <img src={scanFlash.image} alt="" width={96} height={96} />
+          <div>
+            <p>Added</p>
+            <strong>{scanFlash.name}</strong>
+            {scanFlash.detail ? <small>{scanFlash.detail}</small> : null}
+          </div>
         </div>
       )}
       <header className="pos-header">
         <div>
-          <p className="kicker light">StyleARZ</p>
+          <p className="kicker light">
+            <Link to="/admin" className="pos-brand-link">
+              StyleARZ
+            </Link>
+          </p>
           <h1>Point of sale</h1>
         </div>
         <div className="pos-header-actions">
@@ -835,7 +1325,7 @@ export default function Pos() {
           <button type="button" className="pos-mode" onClick={() => setMode((current) => current === "solo" ? "dual" : "solo")}>
             {mode === "solo" ? "Switch to Dual" : "Switch to Solo"}
           </button>
-          <Link to="/admin">Exit POS</Link>
+          <Link to="/admin">Admin home</Link>
         </div>
       </header>
 
@@ -848,7 +1338,16 @@ export default function Pos() {
         </div>
       )}
 
-      <PrepareOffline role="counter" />
+      {OFFLINE_PHONE_LINK_ENABLED ? <PrepareOffline role="counter" /> : null}
+
+      {lastSale ? (
+        <InvoicePanel
+          sale={lastSale}
+          onClose={() => setLastSale(null)}
+          autoFocusPhone={!lastSale.customerPhone}
+          asModal
+        />
+      ) : null}
 
       {mode === "dual" ? (
         <div className="pos-dual">
@@ -865,6 +1364,7 @@ export default function Pos() {
             onAcceptAnswer={acceptOfflineAnswer}
             onStopOffline={stopOfflinePair}
             onSolo={() => setMode("solo")}
+            offlinePhoneLinkEnabled={OFFLINE_PHONE_LINK_ENABLED}
           />
           <div className="pos-register">
             {cartPanel}
@@ -873,7 +1373,15 @@ export default function Pos() {
         </div>
       ) : (
         <div className="pos-solo">
-          <div className={tab === "scan" ? "" : "pos-tab-hidden"}><ScannerPanel onBarcode={addBarcode} busy={busy} /></div>
+          <div className={tab === "scan" ? "" : "pos-tab-hidden"}>
+            <ScannerPanel
+              onBarcode={addBarcode}
+              onPick={addItem}
+              busy={busy}
+              cart={cart}
+              onOpenCart={() => setTab("cart")}
+            />
+          </div>
           <div className={tab === "cart" ? "" : "pos-tab-hidden"}>{cartPanel}</div>
           <div className={tab === "pay" ? "" : "pos-tab-hidden"}>{payPanel}</div>
           <nav className="pos-tabs" aria-label="Point of sale steps">

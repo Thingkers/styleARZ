@@ -26,9 +26,13 @@ export default function ProductCard({ product }) {
     <article className="product-card">
       <Link to={`/product/${product.id}`} className="product-media">
         <img
-          src={imageSrc}
+          src={product.image || "/images/studio-table.jpg"}
           alt={product.name}
-          onError={() => setImageSrc("/images/studio-table.jpg")}
+          onError={(event) => {
+            if (event.currentTarget.dataset.fallback === "1") return;
+            event.currentTarget.dataset.fallback = "1";
+            event.currentTarget.src = "/images/studio-table.jpg";
+          }}
         />
         <span>{product.audience} · {product.category}</span>
       </Link>

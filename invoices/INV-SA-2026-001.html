@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice INV-SA-2026-001 — Thingkers Intelligence → StyleARZ</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
+    :root {
+      --ink: #141414;
+      --muted: #5c5c5c;
+      --line: #d8d4cc;
+      --paper: #f7f5f1;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #e8e4dc;
+      color: var(--ink);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 11.5px;
+      line-height: 1.35;
+    }
+
+    .toolbar {
+      width: 210mm;
+      max-width: 100%;
+      margin: 0.75rem auto 0;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .toolbar button {
+      border: 1px solid #222;
+      background: #111;
+      color: #fff;
+      padding: 0.45rem 0.8rem;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .sheet {
+      width: 210mm;
+      min-height: 297mm;
+      max-width: 100%;
+      margin: 0.75rem auto 1.25rem;
+      background: #fff;
+      border: 1px solid var(--line);
+      padding: 12mm;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    }
+
+    .top {
+      display: grid;
+      grid-template-columns: 1.35fr 0.65fr;
+      gap: 0.75rem;
+      align-items: start;
+      border-bottom: 1.5px solid #111;
+      padding-bottom: 0.65rem;
+    }
+
+    .brand-kicker {
+      margin: 0 0 0.25rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .brand-logo {
+      display: block;
+      width: 170px;
+      height: auto;
+      margin: 0 0 0.3rem;
+    }
+
+    .brand-line {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+
+    .meta { text-align: right; }
+
+    .meta h1 {
+      margin: 0 0 0.3rem;
+      font-size: 1.25rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .meta p {
+      margin: 0.1rem 0;
+      font-size: 0.85rem;
+    }
+
+    .parties {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+      margin: 0.7rem 0 0.75rem;
+    }
+
+    .party {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      padding: 0.55rem 0.65rem;
+    }
+
+    .party h2 {
+      margin: 0 0 0.25rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .party strong {
+      display: block;
+      font-size: 0.92rem;
+      margin-bottom: 0.15rem;
+    }
+
+    .party p {
+      margin: 0.08rem 0;
+      color: #333;
+      font-size: 0.8rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 0.4rem 0.35rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1.5px solid #111;
+      padding-bottom: 0.35rem;
+    }
+
+    td.amount, th.amount {
+      text-align: right;
+      white-space: nowrap;
+      width: 5.5rem;
+    }
+
+    td.num { width: 1.4rem; color: var(--muted); }
+
+    .item-title {
+      font-weight: 700;
+      margin: 0 0 0.1rem;
+      font-size: 0.86rem;
+    }
+
+    .item-detail {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
+
+    .bottom {
+      margin-top: 0.7rem;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 0.75rem;
+      align-items: start;
+    }
+
+    .notes {
+      font-size: 0.78rem;
+      color: #333;
+    }
+
+    .notes h3 {
+      margin: 0 0 0.2rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .notes ul {
+      margin: 0;
+      padding-left: 1rem;
+    }
+
+    .notes li { margin: 0.1rem 0; }
+
+    .pay-box {
+      border: 1px solid #111;
+      background: #111;
+      color: #fff;
+      padding: 0.55rem 0.7rem;
+    }
+
+    .pay-box span {
+      display: block;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.8;
+    }
+
+    .pay-box strong {
+      display: block;
+      margin-top: 0.15rem;
+      font-size: 1.2rem;
+    }
+
+    .sign {
+      margin-top: 1.1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .sign-block {
+      border-top: 1px solid var(--line);
+      padding-top: 0.35rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      min-height: 2.6rem;
+    }
+
+    .footer {
+      margin-top: 0.85rem;
+      padding-top: 0.45rem;
+      border-top: 1px solid var(--line);
+      font-size: 0.7rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    @media print {
+      html, body {
+        background: #fff;
+        width: 210mm;
+        height: 297mm;
+      }
+
+      .toolbar { display: none !important; }
+
+      .sheet {
+        margin: 0;
+        width: 100%;
+        min-height: auto;
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">Print / Save PDF</button>
+  </div>
+
+  <article class="sheet" aria-label="Invoice INV-SA-2026-001">
+    <header class="top">
+      <div>
+        <p class="brand-kicker">From</p>
+        <img
+          class="brand-logo"
+          src="assets/thingkers-logo-on-light.png"
+          alt="Thingkers Intelligence"
+          width="170"
+          height="59"
+        />
+        <p class="brand-line">
+          Thingkers Intelligence · Dhaka · thingkers.com<br />
+          info@thingkersintelligence.com · +880 1916-642465
+        </p>
+      </div>
+      <div class="meta">
+        <h1>Invoice</h1>
+        <p><strong>No.</strong> INV-SA-2026-001</p>
+        <p><strong>Date</strong> 22 November 2026</p>
+      </div>
+    </header>
+
+    <section class="parties">
+      <div class="party">
+        <h2>Bill to</h2>
+        <strong>StyleARZ</strong>
+        <p>Fashion retail · stylearz.com</p>
+      </div>
+      <div class="party">
+        <h2>Coverage</h2>
+        <strong>Domain · Hosting · Ecommerce · POS · Inventory</strong>
+        <p>Domain &amp; hosting term as listed · systems setup &amp; delivery</p>
+      </div>
+    </section>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Description</th>
+          <th class="amount">Amount (৳)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td>
+          <td>
+            <p class="item-title">Domain — stylearz.com</p>
+            <p class="item-detail">Domain registration / renewal · DNS to StyleARZ hosting · SSL-ready site</p>
+          </td>
+          <td class="amount">Included</td>
+        </tr>
+        <tr>
+          <td class="num">2</td>
+          <td>
+            <p class="item-title">Hosting</p>
+            <p class="item-detail">Namecheap Premium / cPanel Node.js · SSL · MySQL · uploads storage</p>
+          </td>
+          <td class="amount">Included</td>
+        </tr>
+        <tr>
+          <td class="num">3</td>
+          <td>
+            <p class="item-title">Ecommerce storefront</p>
+            <p class="item-detail">stylearz.com shop · product browsing · home collections · admin content &amp; offers</p>
+          </td>
+          <td class="amount">Included</td>
+        </tr>
+        <tr>
+          <td class="num">4</td>
+          <td>
+            <p class="item-title">POS (point of sale)</p>
+            <p class="item-detail">Till · USB/camera barcode scan · cart/checkout · invoices · SMS · offline sync · offer discounts</p>
+          </td>
+          <td class="amount">Included</td>
+        </tr>
+        <tr>
+          <td class="num">5</td>
+          <td>
+            <p class="item-title">Inventory</p>
+            <p class="item-detail">Catalogue · barcode/SKU labels · stock vs POS sales · sellable/display products · admin uploads</p>
+          </td>
+          <td class="amount">Included</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="bottom">
+      <section class="notes">
+        <h3>Notes</h3>
+        <ul>
+          <li>Package includes domain, hosting, ecommerce, POS, and inventory as listed.</li>
+          <li>Reference <strong>INV-SA-2026-001</strong> with payment.</li>
+        </ul>
+      </section>
+      <div class="pay-box">
+        <span>Total payable</span>
+        <strong>৳ 13,000</strong>
+      </div>
+    </div>
+
+    <section class="sign">
+      <div class="sign-block">
+        Prepared by<br />
+        <strong style="color:var(--ink);">Thingkers Intelligence</strong>
+      </div>
+      <div class="sign-block">
+        Received / acknowledged by<br />
+        <strong style="color:var(--ink);">StyleARZ</strong>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>Thank you for working with Thingkers Intelligence.</span>
+      <span>INV-SA-2026-001</span>
+    </footer>
+  </article>
+</body>
+</html>

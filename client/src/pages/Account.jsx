@@ -408,7 +408,7 @@ export function Profile() {
         <Link to="/wardrobe">Wardrobe</Link>
         <Link to="/planner">Planner</Link>
         <Link to="/notifications">Notifications</Link>
-        {user.role === "admin" && <Link to="/admin">Atelier admin</Link>}
+        {(user.role === "admin" || user.role === "superadmin") && <Link to="/admin">Atelier admin</Link>}
       </div>
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}

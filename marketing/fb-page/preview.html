@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STYLEARZ · Facebook Page preview</title>
+  <style>
+    :root {
+      --orange: #ff6600;
+      --ink: #0a0a0a;
+      --paper: #f3f3f1;
+      --fb: #f0f2f5;
+      --card: #fff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", "Helvetica Neue", Arial, sans-serif;
+      background: var(--fb);
+      color: #050505;
+    }
+    .wrap { max-width: 940px; margin: 24px auto 64px; padding: 0 12px; }
+    .card {
+      background: var(--card);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08);
+    }
+    .cover {
+      width: 100%;
+      aspect-ratio: 1640 / 924;
+      object-fit: cover;
+      display: block;
+      background: var(--ink);
+    }
+    .identity {
+      display: flex;
+      gap: 16px;
+      align-items: flex-end;
+      padding: 0 24px 20px;
+      margin-top: -72px;
+      position: relative;
+    }
+    .avatar {
+      width: 168px;
+      height: 168px;
+      border-radius: 50%;
+      border: 4px solid #fff;
+      object-fit: cover;
+      background: var(--ink);
+      flex-shrink: 0;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 32px;
+      letter-spacing: -0.02em;
+    }
+    .tag { color: #65676b; font-size: 15px; margin: 0 0 8px; }
+    .meta { color: #65676b; font-size: 14px; margin: 0; }
+    .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      padding-bottom: 8px;
+    }
+    .btn {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: default;
+    }
+    .btn-primary { background: var(--orange); color: #fff; }
+    .btn-ghost { background: #e4e6eb; color: #050505; }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-top: 1px solid #dddfe2;
+      padding: 4px 16px 0;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 14px 16px;
+      color: #65676b;
+      font-weight: 600;
+      font-size: 15px;
+      border-bottom: 3px solid transparent;
+    }
+    .tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+      .identity { flex-wrap: wrap; }
+      .actions { margin-left: 0; width: 100%; }
+      .avatar { width: 120px; height: 120px; margin-top: -40px; }
+    }
+    .about h2, .feed h2 {
+      font-size: 17px;
+      margin: 0 0 12px;
+    }
+    .about p { margin: 0 0 10px; font-size: 14px; line-height: 1.45; color: #050505; }
+    .about ul { margin: 0; padding: 0; list-style: none; font-size: 14px; color: #050505; }
+    .about li { margin: 8px 0; }
+    .pill {
+      display: inline-block;
+      background: #e7f3ff;
+      color: #0866ff;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .post img {
+      width: 100%;
+      display: block;
+      border-radius: 8px;
+    }
+    .post {
+      margin-bottom: 16px;
+      padding: 12px;
+    }
+    .post .cap {
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 10px 0 0;
+      white-space: pre-wrap;
+    }
+    .note {
+      max-width: 940px;
+      margin: 16px auto 0;
+      padding: 0 12px;
+      color: #65676b;
+      font-size: 13px;
+    }
+    .brand-bar {
+      height: 4px;
+      background: linear-gradient(90deg, var(--ink), var(--orange));
+    }
+  </style>
+</head>
+<body>
+  <div class="brand-bar"></div>
+  <p class="note">Preview only — upload files from <code>out/</code> in Meta Business Suite. See <code>SETUP.md</code>.</p>
+  <div class="wrap">
+    <div class="card">
+      <img class="cover" src="out/cover-1640x924.jpg" alt="STYLEARZ cover" />
+      <div class="identity">
+        <img class="avatar" src="out/avatar-1080.jpg" alt="STYLEARZ avatar" />
+        <div>
+          <h1>STYLEARZ</h1>
+          <p class="tag">your personal fashion statement · Clothing brand</p>
+          <p class="meta">College Road, Radhanagar, Pabna · stylearz.com</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="button">Shop Now</button>
+          <button class="btn btn-ghost" type="button">Message</button>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab active">Posts</div>
+        <div class="tab">About</div>
+        <div class="tab">Photos</div>
+        <div class="tab">Shop</div>
+        <div class="tab">Reviews</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card about" style="padding:16px">
+        <h2>Intro</h2>
+        <p>Bangladesh Grade A export casuals for everyday wear — Men, Women, and Children. Style Studio, Lookbook, Quiz, Planner &amp; Wardrobe on stylearz.com.</p>
+        <ul>
+          <li>🌐 <strong>stylearz.com</strong></li>
+          <li>📍 College Road, Radhanagar, Pabna</li>
+          <li>📞 +880 1612-225916</li>
+          <li>🗓️ Grand opening 28 November</li>
+        </ul>
+        <p style="margin-top:16px"><span class="pill">Page</span> not personal profile</p>
+      </div>
+      <div>
+        <div class="card post">
+          <img src="out/post-grand-opening.jpg" alt="Grand opening post" />
+          <p class="cap">STYLEARZ grand opening — 28 November, Pabna.
+Opening discounts + lifetime 10% in store.
+Shop → stylearz.com</p>
+        </div>
+        <div class="card post">
+          <img src="out/post-studio.jpg" alt="Studio post" />
+          <p class="cap">Build the look before you buy — Mix &amp; match · Colour match · Budget.
+stylearz.com/studio</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
