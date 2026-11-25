@@ -66,11 +66,15 @@ git add -A && git commit -m "Describe why" && git push origin main
 
 ## 3. Local development
 
-Requires **Node 18+**.
+Requires **Node 18+** and **MySQL 8**.
 
 ```bash
 cd styleARZ
 npm install
+cp .env.example .env
+# set JWT_SECRET and MYSQL_* (host, port, user, password, database)
+npm run db:migrate
+npm run seed:reset   # first time, or to wipe and reseed
 npm run dev
 ```
 
@@ -78,6 +82,16 @@ npm run dev
 |---------|-----|
 | Storefront (Vite) | http://127.0.0.1:5173 |
 | API (Express) | http://127.0.0.1:4000 |
+
+### MySQL scripts
+
+| Command | Purpose |
+|---------|---------|
+| `npm run db:migrate` | Create/update tables |
+| `npm run seed:reset` | Wipe app tables and load demo seed |
+| `npm run db:import-json` | One-time import from `server/data/db.json` (if you still have an old file) |
+
+Data no longer lives in `db.json`. The API loads from MySQL on boot and writes every change back to MySQL.
 
 Vite proxies `/api` → port 4000.
 
@@ -145,16 +159,23 @@ Exit with `exit` when connected.
 | Application URL | `stylearz.com` (path empty) |
 | Application startup file | `app.js` |
 
-3. Environment variables:
+3. Create a MySQL database in cPanel → **MySQL Databases** (DB + user + ALL PRIVILEGES). Note the full DB name (often `stylvrey_stylearz`).
+
+4. Environment variables:
 
 | Name | Value |
 |------|--------|
 | `NODE_ENV` | `production` |
 | `JWT_SECRET` | long random string (same as in your private `credentials.json`) |
 | `PORT` | usually set automatically by the selector |
+| `MYSQL_HOST` | `localhost` (typical on cPanel) |
+| `MYSQL_PORT` | `3306` |
+| `MYSQL_USER` | cPanel MySQL user |
+| `MYSQL_PASSWORD` | cPanel MySQL password |
+| `MYSQL_DATABASE` | cPanel MySQL database name |
 
-4. Important CloudLinux rule: the app root must **not** contain a real `node_modules` folder. The selector creates a **symlink** named `node_modules` into a virtual env. Use **Run NPM Install** in the cPanel UI — do **not** run `npm install` in the app root over SSH after the app exists.
-5. **Create** → **Run NPM Install** → **Start** / **Restart**
+5. Important CloudLinux rule: the app root must **not** contain a real `node_modules` folder. The selector creates a **symlink** named `node_modules` into a virtual env. Use **Run NPM Install** in the cPanel UI — do **not** run `npm install` in the app root over SSH after the app exists.
+6. **Create** → **Run NPM Install** → SSH once: `cd ~/stylearz && npm run db:migrate` (and `npm run db:import-json` if migrating old `db.json`) → **Start** / **Restart**
 
 ---
 
@@ -254,7 +275,8 @@ Send them this file (`deploy/GUIDE.md`) plus vault access for cPanel/SSH.
 **First-time server**
 
 - [ ] Node app created (`stylearz` / `app.js`)
-- [ ] Env: `NODE_ENV`, `JWT_SECRET`
+- [ ] Env: `NODE_ENV`, `JWT_SECRET`, `MYSQL_*`
+- [ ] MySQL DB created; `npm run db:migrate` run on server
 - [ ] Run NPM Install + Start
 - [ ] SSL issued for stylearz.com
 - [ ] Demo passwords changed for production

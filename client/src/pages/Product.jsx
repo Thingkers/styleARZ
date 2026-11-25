@@ -58,6 +58,7 @@ export default function Product() {
   const [error, setError] = useState("");
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
+  const [imageIndex, setImageIndex] = useState(0);
   const [guide, setGuide] = useState(false);
   const [fit, setFit] = useState({ height: "172", fit: "mixed" });
   const [advice, setAdvice] = useState(null);
@@ -72,6 +73,7 @@ export default function Product() {
     setError("");
     setSize("");
     setColor("");
+    setImageIndex(0);
     setAdvice(null);
     setFitLoading(false);
     api(`/api/products/${id}`)
@@ -163,8 +165,17 @@ export default function Product() {
 
   const { product, related } = data;
   const saved = wishlist.includes(product.id);
-  const stockAvailable = Number.isFinite(product.stock) && product.stock >= 0;
-  const inStock = stockAvailable && product.stock > 0;
+  const gallery =
+    Array.isArray(product.images) && product.images.length
+      ? product.images
+      : product.image
+        ? [product.image]
+        : ["/images/studio-table.jpg"];
+  const activeImage = gallery[Math.min(imageIndex, gallery.length - 1)] || gallery[0];
+  const sizeAvailable =
+    product.sizeStock && size && product.sizeStock[size] !== undefined
+      ? Number(product.sizeStock[size]) || 0
+      : product.stock;
 
   return (
     <div className="page wrap">
@@ -177,7 +188,21 @@ export default function Product() {
       </p>
       <div className="pdp">
         <div className="gallery">
-          <img src={product.image || ""} alt={product.name} />
+          <img src={activeImage} alt={product.name} />
+          {gallery.length > 1 && (
+            <div className="gallery-thumbs" role="list">
+              {gallery.map((src, index) => (
+                <button
+                  key={`${src}-${index}`}
+                  type="button"
+                  className={index === imageIndex ? "on" : ""}
+                  onClick={() => setImageIndex(index)}
+                >
+                  <img src={src} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="buybox">
           <p className="kicker">{product.category}</p>
@@ -216,17 +241,15 @@ export default function Product() {
               ))}
             </div>
           </div>
-          <p className={!stockAvailable || product.stock < 3 ? "warn" : "muted"}>
-            {!stockAvailable
-              ? "Stock unavailable"
-              : product.stock === 0
-                ? "Out of stock"
-                : product.stock < 3
-                  ? `Only ${product.stock} left`
-                  : "In stock"}
+          <p className={sizeAvailable < 3 ? "warn" : "muted"}>
+            {sizeAvailable === 0
+              ? "Out of stock in this size"
+              : sizeAvailable < 3
+                ? `Only ${sizeAvailable} left in this size`
+                : "In stock"}
           </p>
           <div className="hero-actions">
-            <button type="button" className="btn solid" onClick={onAdd} disabled={!inStock}>
+            <button type="button" className="btn solid" onClick={onAdd} disabled={sizeAvailable === 0}>
               Add to bag
             </button>
             <button type="button" className="btn line" onClick={() => toggleWish(product.id)}>

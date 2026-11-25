@@ -6,7 +6,7 @@ Fashion storefront for [stylearz.com](https://stylearz.com) — **React** fronte
 |--|--|
 | **Repo** | https://github.com/Thingkers/styleARZ |
 | **Live** | https://stylearz.com |
-| **Stack** | React 18, Vite, Express, Node 18+ |
+| **Stack** | React 18, Vite, Express, MySQL, Node 18+ |
 | **Org** | [Thingkers](https://github.com/Thingkers) |
 
 ---
@@ -18,6 +18,9 @@ git clone https://github.com/Thingkers/styleARZ.git
 cd styleARZ
 npm install
 cp .env.example .env
+# set JWT_SECRET and MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE
+npm run db:migrate
+npm run seed:reset
 npm run dev
 ```
 
@@ -35,7 +38,7 @@ Open **http://127.0.0.1:5173**
 | Customer | `farhan@stylearz.com` | `style123` |
 | Admin | `admin@stylearz.com` | `style123` |
 
-Reset local database:
+Reset local MySQL seed data:
 
 ```bash
 npm run seed:reset
@@ -50,7 +53,9 @@ npm run seed:reset
 | `npm run dev` | API + Vite together |
 | `npm run build` | Production build → `server/public/` |
 | `npm start` | Run production server (`app.js`) |
-| `npm run seed:reset` | Recreate seed `db.json` |
+| `npm run db:migrate` | Apply MySQL schema |
+| `npm run db:import-json` | Import legacy `server/data/db.json` into MySQL |
+| `npm run seed:reset` | Wipe MySQL app tables and re-seed |
 | `bash scripts/deploy-ssh.sh` | Build + rsync to hosting |
 
 ---

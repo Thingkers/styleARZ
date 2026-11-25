@@ -20,20 +20,11 @@
     }
   };
 
-  document.querySelectorAll(".logo-style").forEach((el) => {
+  document.querySelectorAll(".logo-lockup").forEach((el) => {
     el.textContent = "PORTAL";
-  });
-  document.querySelectorAll(".logo-arz").forEach((el) => {
-    el.textContent = "";
   });
   document.querySelectorAll(".logo-tag").forEach((el) => {
     el.textContent = "Organization · Inventory · POS";
-  });
-  document.querySelectorAll(".hero-lockup .logo-style").forEach((el) => {
-    el.textContent = "PORTAL";
-  });
-  document.querySelectorAll(".hero-lockup .logo-arz").forEach((el) => {
-    el.textContent = "";
   });
   walk(document.body);
   const wipe = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

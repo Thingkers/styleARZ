@@ -396,9 +396,9 @@ def build_lang(lang: str) -> Path:
     finally:
         writer.close()
 
-    music = AUDIO / "soothy-bits.mp3"
+    music = AUDIO / "hiphop.mp3"
     if not music.exists():
-        music = AUDIO / "robotic-eco.mp3"
+        music = AUDIO / "soothy-bits.mp3"
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     out = OUT / f"thingkers-pos-inventory-{'bn' if bangla else 'en'}.mp4"
     fade = max(1.0, duration - 2.2)
@@ -462,8 +462,8 @@ def main() -> None:
 
     # ensure offer cards + music exist
     subprocess.run([str(ROOT / ".venv/bin/python"), str(ROOT / "make_offer_cards.py")], check=True)
-    if not (AUDIO / "soothy-bits.mp3").exists():
-        subprocess.run([str(ROOT / ".venv/bin/python"), str(ROOT / "gen_soothy_bits.py")], check=True)
+    if not (AUDIO / "hiphop.mp3").exists():
+        subprocess.run([str(ROOT / ".venv/bin/python"), str(ROOT / "gen_hiphop.py")], check=True)
 
     build_lang("en")
     build_lang("bn")

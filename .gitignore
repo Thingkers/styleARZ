@@ -26,6 +26,7 @@ id_ed25519
 # Runtime data
 server/data/db.json
 server/uploads/
+.mysql-data/
 
 # Hosting docs that contain passwords / account secrets
 styleArz-server.pdf
@@ -35,3 +36,5 @@ styleArz-server.pdf
 .vscode/
 *.swp
 *~
+.venv-img
+app.zip

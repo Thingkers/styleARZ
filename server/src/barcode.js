@@ -46,7 +46,16 @@ function isValidStyleBarcode(code) {
 
 function isTaken(db, code) {
   const upper = code.toUpperCase();
-  return (db.inventoryItems || []).some((item) => String(item.barcode || "").toUpperCase() === upper);
+  if ((db.inventoryItems || []).some((item) => String(item.barcode || "").toUpperCase() === upper)) {
+    return true;
+  }
+  // Active quick-label drafts reserve barcodes until they are converted or deleted.
+  return (db.labelDrafts || []).some(
+    (draft) =>
+      draft &&
+      draft.status !== "converted" &&
+      String(draft.barcode || "").toUpperCase() === upper
+  );
 }
 
 // Allocates the next unique SA barcode and advances db.inventorySeq.

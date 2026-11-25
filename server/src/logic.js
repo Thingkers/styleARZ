@@ -136,7 +136,11 @@ function priceItems(products, items) {
     const color = product.colors.find((entry) => entry.name === item.color);
     if (!color) return { error: `Choose a colour for ${product.name}.` };
     if (!product.sizes.includes(item.size)) return { error: `Choose a size for ${product.name}.` };
-    if (product.stock < qty) return { error: `${product.name} does not have enough stock.` };
+    const available =
+      product.sizeStock && product.sizeStock[item.size] !== undefined
+        ? Number(product.sizeStock[item.size]) || 0
+        : product.stock;
+    if (available < qty) return { error: `${product.name} (${item.size}) does not have enough stock.` };
     priced.push({
       productId: product.id,
       name: product.name,

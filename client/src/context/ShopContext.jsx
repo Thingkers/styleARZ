@@ -3,9 +3,7 @@ import { api } from "../api";
 import { useAuth } from "./AuthContext";
 
 const ShopContext = createContext(null);
-const CART_STORAGE_KEY = "sa-cart";
-const GUEST_WISHLIST_STORAGE_KEY = "sa-wish:guest";
-const MAX_CART_QUANTITY = 5;
+const GUEST_WISH_KEY = "sa-wish-guest";
 
 function readStoredList(key) {
   try {
@@ -16,63 +14,14 @@ function readStoredList(key) {
   }
 }
 
-function writeStoredList(key, items) {
-  try {
-    localStorage.setItem(key, JSON.stringify(items));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeStoredList(key) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    return false;
-  }
-  return true;
-}
-
-function readCart() {
-  return readStoredList(CART_STORAGE_KEY).filter(
-    (item) =>
-      item &&
-      typeof item.productId === "string" &&
-      typeof item.name === "string" &&
-      typeof item.price === "number" &&
-      Number.isFinite(item.price) &&
-      item.price >= 0 &&
-      typeof item.size === "string" &&
-      typeof item.color === "string" &&
-      Number.isInteger(item.qty) &&
-      item.qty > 0
-  ).map((item) => ({
-    ...item,
-    stock: Number.isFinite(item.stock) && item.stock >= 1 ? item.stock : MAX_CART_QUANTITY,
-    qty: Math.min(item.qty, MAX_CART_QUANTITY),
-  }));
-}
-
-function cleanProductIds(ids) {
-  return [...new Set((Array.isArray(ids) ? ids : []).filter(
-    (productId) => typeof productId === "string" && productId.length > 0
-  ))];
-}
-
-function readGuestWishlist() {
-  try {
-    return cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
-  } catch {
-    return [];
-  }
+function wishKeyFor(userId) {
+  return userId ? `sa-wish:${userId}` : GUEST_WISH_KEY;
 }
 
 export function ShopProvider({ children }) {
-  const { user, ready: authReady } = useAuth();
-  const [cart, setCart] = useState(readCart);
-  const cartRef = useRef(cart);
-  const [wishlist, setWishlist] = useState(() => cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY)));
+  const { user } = useAuth();
+  const [cart, setCart] = useState(() => readList("sa-cart"));
+  const [wishlist, setWishlist] = useState(() => readList(GUEST_WISH_KEY));
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -83,39 +32,31 @@ export function ShopProvider({ children }) {
   }, [cart]);
 
   useEffect(() => {
-    if (!authReady) return undefined;
+    localStorage.setItem(wishKeyFor(user?.id), JSON.stringify(wishlist));
+  }, [wishlist, user?.id]);
 
-    let active = true;
+  // Load the signed-in account wishlist (replace — never merge another user's device list).
+  useEffect(() => {
     if (!user) {
-      setWishlist(readGuestWishlist());
-      return () => {
-        active = false;
-      };
+      setWishlist(readList(GUEST_WISH_KEY));
+      return;
     }
-
-    const guestWishlist = cleanProductIds(readStoredList(GUEST_WISHLIST_STORAGE_KEY));
-    const merged = cleanProductIds([...(user.wishlist || []), ...guestWishlist]);
-    setWishlist(merged);
-
-    api("/api/wishlist", { method: "PUT", body: { productIds: merged } })
+    let cancelled = false;
+    const cached = readList(wishKeyFor(user.id));
+    const serverList = Array.isArray(user.wishlist) ? user.wishlist : [];
+    setWishlist(serverList.length ? serverList : cached);
+    api("/api/wishlist")
       .then((data) => {
-        if (!Array.isArray(data.productIds)) {
-          throw new Error("The server returned an invalid wishlist.");
-        }
-        if (!active) return;
-        setWishlist(cleanProductIds(data.productIds));
-        if (!removeStoredList(GUEST_WISHLIST_STORAGE_KEY)) {
-          setToast("Wishlist synced, but guest wishlist data could not be cleared from this browser.");
-        }
+        if (cancelled) return;
+        const ids = Array.isArray(data.productIds) ? data.productIds : serverList;
+        setWishlist(ids);
+        localStorage.setItem(wishKeyFor(user.id), JSON.stringify(ids));
       })
-      .catch((error) => {
-        if (active) setToast(error.message || "Could not sync your wishlist. Please try again.");
-      });
-
+      .catch(() => {});
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, [authReady, user?.id]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -134,16 +75,17 @@ export function ShopProvider({ children }) {
 
   function addProductToCart(current, product, { size, color, qty = 1 }) {
     if (!size || !color) throw new Error("Choose a size and a colour.");
-    if (!Number.isInteger(qty) || qty < 1) throw new Error("Choose a valid quantity.");
-    const stock = Number(product.stock);
-    if (!Number.isFinite(stock) || stock < 1) throw new Error("This piece is currently out of stock.");
-    const index = current.findIndex(
+    const available =
+      product.sizeStock && product.sizeStock[size] !== undefined
+        ? Number(product.sizeStock[size]) || 0
+        : product.stock;
+    if (available < 1) throw new Error("This piece is currently out of stock.");
+    const index = cart.findIndex(
       (item) => item.productId === product.id && item.size === size && item.color === color
     );
-    const existingQty = index >= 0 ? current[index].qty : 0;
-    const maxQty = Math.min(MAX_CART_QUANTITY, stock);
-    if (existingQty + qty > maxQty) {
-      throw new Error(`You can add up to ${maxQty} of this piece.`);
+    const existingQty = index >= 0 ? cart[index].qty : 0;
+    if (existingQty + qty > available) {
+      throw new Error(`Only ${available} available in size ${size}.`);
     }
     const next = current.slice();
     if (index >= 0) next[index] = { ...next[index], qty: existingQty + qty };
@@ -280,7 +222,7 @@ export function ShopProvider({ children }) {
       count,
       subtotal,
     }),
-    [cart, wishlist, drawer, toast, count, subtotal, user]
+    [cart, wishlist, drawer, toast, count, subtotal]
   );
 
   return <ShopContext.Provider value={value}>{children}</ShopContext.Provider>;
