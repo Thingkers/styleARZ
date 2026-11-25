@@ -23,6 +23,7 @@ export default function InvoicePanel({
   onClose,
   autoFocusPhone = false,
   compact = false,
+  asModal = false,
 }) {
   const [phone, setPhone] = useState(sale?.customerPhone || "");
   const [smsBusy, setSmsBusy] = useState(false);
@@ -92,9 +93,9 @@ export default function InvoicePanel({
     }
   }
 
-  return (
+  const panel = (
     <section
-      className={`pos-invoice-panel${compact ? " is-compact" : ""}`}
+      className={`pos-invoice-panel${compact ? " is-compact" : ""}${asModal ? " is-modal-panel" : ""}`}
       data-invoice-id={sale.id}
       data-preset={preset.id}
       data-kind={preset.kind}
@@ -263,5 +264,21 @@ export default function InvoicePanel({
         {smsNotice && <p className="notice">{smsNotice}</p>}
       </form>
     </section>
+  );
+
+  if (!asModal) return panel;
+
+  return (
+    <div className="pos-invoice-modal no-print-root" role="presentation" onClick={onClose}>
+      <div
+        className="pos-invoice-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sale invoice"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {panel}
+      </div>
+    </div>
   );
 }

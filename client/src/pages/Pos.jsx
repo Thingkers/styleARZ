@@ -1302,7 +1302,12 @@ export default function Pos() {
       {OFFLINE_PHONE_LINK_ENABLED ? <PrepareOffline role="counter" /> : null}
 
       {lastSale ? (
-        <InvoicePanel sale={lastSale} onClose={() => setLastSale(null)} autoFocusPhone={!lastSale.customerPhone} />
+        <InvoicePanel
+          sale={lastSale}
+          onClose={() => setLastSale(null)}
+          autoFocusPhone={!lastSale.customerPhone}
+          asModal
+        />
       ) : null}
 
       {mode === "dual" ? (

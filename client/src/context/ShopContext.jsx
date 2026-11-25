@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useAuth } from "./AuthContext";
 
 const ShopContext = createContext(null);
+const GUEST_WISH_KEY = "sa-wish-guest";
 
 function readList(key) {
   try {
@@ -13,10 +14,14 @@ function readList(key) {
   }
 }
 
+function wishKeyFor(userId) {
+  return userId ? `sa-wish:${userId}` : GUEST_WISH_KEY;
+}
+
 export function ShopProvider({ children }) {
   const { user } = useAuth();
   const [cart, setCart] = useState(() => readList("sa-cart"));
-  const [wishlist, setWishlist] = useState(() => readList("sa-wish"));
+  const [wishlist, setWishlist] = useState(() => readList(GUEST_WISH_KEY));
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -25,16 +30,30 @@ export function ShopProvider({ children }) {
   }, [cart]);
 
   useEffect(() => {
-    localStorage.setItem("sa-wish", JSON.stringify(wishlist));
-  }, [wishlist]);
+    localStorage.setItem(wishKeyFor(user?.id), JSON.stringify(wishlist));
+  }, [wishlist, user?.id]);
 
+  // Load the signed-in account wishlist (replace — never merge another user's device list).
   useEffect(() => {
-    if (!user) return;
-    const merged = [...new Set([...(user.wishlist || []), ...wishlist])];
-    setWishlist(merged);
-    api("/api/wishlist", { method: "PUT", body: { productIds: merged } }).catch(() => {});
-    // Merge once when the signed-in account changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!user) {
+      setWishlist(readList(GUEST_WISH_KEY));
+      return;
+    }
+    let cancelled = false;
+    const cached = readList(wishKeyFor(user.id));
+    const serverList = Array.isArray(user.wishlist) ? user.wishlist : [];
+    setWishlist(serverList.length ? serverList : cached);
+    api("/api/wishlist")
+      .then((data) => {
+        if (cancelled) return;
+        const ids = Array.isArray(data.productIds) ? data.productIds : serverList;
+        setWishlist(ids);
+        localStorage.setItem(wishKeyFor(user.id), JSON.stringify(ids));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -49,13 +68,17 @@ export function ShopProvider({ children }) {
 
   function addToCart(product, { size, color, qty = 1 }) {
     if (!size || !color) throw new Error("Choose a size and a colour.");
-    if (product.stock < 1) throw new Error("This piece is currently out of stock.");
+    const available =
+      product.sizeStock && product.sizeStock[size] !== undefined
+        ? Number(product.sizeStock[size]) || 0
+        : product.stock;
+    if (available < 1) throw new Error("This piece is currently out of stock.");
     const index = cart.findIndex(
       (item) => item.productId === product.id && item.size === size && item.color === color
     );
     const existingQty = index >= 0 ? cart[index].qty : 0;
-    if (existingQty + qty > product.stock) {
-      throw new Error(`Only ${product.stock} available.`);
+    if (existingQty + qty > available) {
+      throw new Error(`Only ${available} available in size ${size}.`);
     }
     const next = cart.slice();
     if (index >= 0) next[index] = { ...next[index], qty: existingQty + qty };
@@ -131,7 +154,7 @@ export function ShopProvider({ children }) {
       count,
       subtotal,
     }),
-    [cart, wishlist, drawer, toast, count, subtotal, user]
+    [cart, wishlist, drawer, toast, count, subtotal]
   );
 
   return <ShopContext.Provider value={value}>{children}</ShopContext.Provider>;

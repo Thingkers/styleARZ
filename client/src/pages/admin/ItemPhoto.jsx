@@ -4,6 +4,7 @@ import { Modal } from "../../components/ui";
 const MAX_EDGE = 1600;
 // The API rejects images larger than 2 MB once decoded.
 const MAX_BYTES = 1.9 * 1024 * 1024;
+const MAX_PHOTOS = 8;
 
 function canUseLiveCamera() {
   return Boolean(navigator.mediaDevices?.getUserMedia);
@@ -129,19 +130,40 @@ function LiveCamera({ onCapture, onClose }) {
   );
 }
 
-export default function ItemPhoto({ src, onChange, onRemove, note }) {
+/** Single-photo API kept for create wizard; multi via `images` + onAdd/onRemoveAt. */
+export default function ItemPhoto({
+  src,
+  images,
+  onChange,
+  onAdd,
+  onRemove,
+  onRemoveAt,
+  note,
+  max = MAX_PHOTOS,
+}) {
+  const gallery = Array.isArray(images) && images.length ? images : src ? [src] : [];
+  const multi = Boolean(onAdd || onRemoveAt);
   const [camera, setCamera] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  const [active, setActive] = useState(0);
 
-  async function onFile(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+  useEffect(() => {
+    if (active >= gallery.length) setActive(Math.max(0, gallery.length - 1));
+  }, [gallery.length, active]);
+
+  async function ingest(file) {
     if (!file) return;
     setError("");
     setWorking(true);
     try {
-      onChange(await photoFromFile(file));
+      const dataUrl = await photoFromFile(file);
+      if (multi && onAdd) {
+        if (gallery.length >= max) throw new Error(`You can add up to ${max} photos.`);
+        await onAdd(dataUrl);
+      } else if (onChange) {
+        onChange(dataUrl);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -149,11 +171,19 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
     }
   }
 
+  async function onFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    await ingest(file);
+  }
+
+  const primary = gallery[active] || gallery[0] || "";
+
   return (
     <div className="inv-photo">
-      {src ? (
+      {primary ? (
         <div className="inv-photo-frame has-photo">
-          <img src={src} alt="Item photo" />
+          <img src={primary} alt="Item photo" />
         </div>
       ) : (
         <label className="inv-photo-frame inv-file">
@@ -168,23 +198,44 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
           <input type="file" accept="image/*" capture="environment" onChange={onFile} disabled={working} />
         </label>
       )}
+
+      {gallery.length > 1 && (
+        <div className="inv-photo-thumbs" role="list">
+          {gallery.map((entry, index) => (
+            <button
+              key={`${entry}-${index}`}
+              type="button"
+              className={`inv-photo-thumb${index === active ? " is-active" : ""}`}
+              onClick={() => setActive(index)}
+            >
+              <img src={entry} alt="" />
+            </button>
+          ))}
+        </div>
+      )}
+
       {note && <p className="muted inv-photo-note">{note}</p>}
       {error && <p className="error">{error}</p>}
       <div className="inv-photo-actions">
         <label className="btn dark inv-file inv-file-capture">
           Take photo
-          <input type="file" accept="image/*" capture="environment" onChange={onFile} disabled={working} />
+          <input type="file" accept="image/*" capture="environment" onChange={onFile} disabled={working || gallery.length >= max} />
         </label>
         <label className="btn line inv-file">
-          {src ? "Replace photo" : "Upload photo"}
-          <input type="file" accept="image/*" onChange={onFile} disabled={working} />
+          {multi ? (gallery.length ? "Add photo" : "Upload photo") : src ? "Replace photo" : "Upload photo"}
+          <input type="file" accept="image/*" onChange={onFile} disabled={working || gallery.length >= max} />
         </label>
         {canUseLiveCamera() && (
-          <button type="button" className="btn line" onClick={() => setCamera(true)}>
+          <button type="button" className="btn line" onClick={() => setCamera(true)} disabled={gallery.length >= max}>
             Live camera
           </button>
         )}
-        {src && onRemove && (
+        {multi && gallery.length > 0 && onRemoveAt && (
+          <button type="button" className="text-link" onClick={() => onRemoveAt(active)}>
+            Remove this photo
+          </button>
+        )}
+        {!multi && src && onRemove && (
           <button type="button" className="text-link" onClick={onRemove}>
             Remove photo
           </button>
@@ -193,10 +244,15 @@ export default function ItemPhoto({ src, onChange, onRemove, note }) {
       {camera && (
         <LiveCamera
           onClose={() => setCamera(false)}
-          onCapture={(dataUrl) => {
+          onCapture={async (dataUrl) => {
             setError("");
-            onChange(dataUrl);
-            setCamera(false);
+            try {
+              if (multi && onAdd) await onAdd(dataUrl);
+              else if (onChange) onChange(dataUrl);
+              setCamera(false);
+            } catch (err) {
+              setError(err.message);
+            }
           }}
         />
       )}

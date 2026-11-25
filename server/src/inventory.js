@@ -199,8 +199,12 @@ function createItem(db, input = {}) {
   const audienceRaw = text(input.audience, 20);
   const audience = AUDIENCES.includes(audienceRaw) ? audienceRaw : "Unisex";
   if (category) assertAudienceAllowed(category, audience);
+  const id = newId();
+  const primaryImage = typeof input.image === "string" ? text(input.image, 200) : "";
+  const images = normalizeImages(input.images, primaryImage);
   const item = {
-    id: newId(),
+    id,
+    styleId: text(input.styleId, 40) || id,
     sku,
     barcode,
     name,
@@ -212,7 +216,8 @@ function createItem(db, input = {}) {
     price,
     cost,
     stock,
-    image: typeof input.image === "string" ? text(input.image, 200) : "",
+    image: images[0] || "",
+    images,
     notes: text(input.notes, 400),
     listed: input.listed === false ? false : true,
     featured: Boolean(input.featured),
@@ -223,6 +228,31 @@ function createItem(db, input = {}) {
   };
   db.inventoryItems.unshift(item);
   return item;
+}
+
+function normalizeImages(images, primary = "") {
+  const list = Array.isArray(images)
+    ? images.map((entry) => text(entry, 240)).filter(Boolean)
+    : [];
+  if (primary && !list.includes(primary)) list.unshift(text(primary, 240));
+  return [...new Set(list)];
+}
+
+function itemImages(item) {
+  if (!item) return [];
+  return normalizeImages(item.images, item.image || "");
+}
+
+function syncItemImages(item, images) {
+  const next = normalizeImages(images, "");
+  item.images = next;
+  item.image = next[0] || "";
+  return item;
+}
+
+function styleKey(item) {
+  if (item.styleId) return `style:${item.styleId}`;
+  return `legacy:${item.name}|${item.color || ""}|${item.category || ""}`;
 }
 
 function addSizes(db, id, sizesInput, options = {}) {
@@ -249,6 +279,7 @@ function addSizes(db, id, sizesInput, options = {}) {
       skipped.push(size);
       continue;
     }
+    if (!parent.styleId) parent.styleId = parent.id;
     const item = createItem(db, {
       name: parent.name,
       color: parent.color,
@@ -261,7 +292,10 @@ function addSizes(db, id, sizesInput, options = {}) {
       stock,
       notes: parent.notes,
       image: parent.image || "",
+      images: itemImages(parent),
+      styleId: parent.styleId || parent.id,
       listed: parent.listed !== false,
+      featured: Boolean(parent.featured),
     });
     created.push(item);
   }
@@ -270,30 +304,69 @@ function addSizes(db, id, sizesInput, options = {}) {
 }
 
 function toShopProduct(item) {
-  const colorName = item.color || "Default";
-  const hex = item.colorHex && /^#[0-9a-fA-F]{3,8}$/.test(item.colorHex) ? item.colorHex : "#4e4e4e";
+  return toGroupedShopProduct([item]);
+}
+
+/** One shop card per style (name/colour), with all sizes aggregated. */
+function toGroupedShopProduct(items) {
+  const sorted = (items || []).slice().sort((a, b) => {
+    const ao = Number.isFinite(a.sortOrder) ? a.sortOrder : 9999;
+    const bo = Number.isFinite(b.sortOrder) ? b.sortOrder : 9999;
+    if (ao !== bo) return ao - bo;
+    return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+  });
+  const primary = sorted[0];
+  if (!primary) return null;
+  const styleId = primary.styleId || primary.id;
+  const sizeStock = {};
+  const variantIds = {};
+  const sizes = [];
+  sorted.forEach((item) => {
+    const size = item.size || "One";
+    if (!variantIds[size]) {
+      sizes.push(size);
+      variantIds[size] = item.id;
+      sizeStock[size] = 0;
+    }
+    sizeStock[size] += Number(item.stock) || 0;
+  });
+  const images = [];
+  const seen = new Set();
+  sorted.forEach((item) => {
+    itemImages(item).forEach((src) => {
+      if (!seen.has(src)) {
+        seen.add(src);
+        images.push(src);
+      }
+    });
+  });
+  const stock = Object.values(sizeStock).reduce((sum, value) => sum + value, 0);
+  const colorName = primary.color || "Default";
+  const hex = primary.colorHex && /^#[0-9a-fA-F]{3,8}$/.test(primary.colorHex) ? primary.colorHex : "#4e4e4e";
   return {
-    id: item.id,
-    name: item.name,
-    audience: AUDIENCES.includes(item.audience) ? item.audience : "Unisex",
-    category: item.category || "Retail",
+    id: styleId,
+    name: primary.name,
+    audience: AUDIENCES.includes(primary.audience) ? primary.audience : "Unisex",
+    category: primary.category || "Retail",
     slot: "other",
-    price: item.price,
-    stock: item.stock,
-    featured: Boolean(item.featured),
+    price: primary.price,
+    stock,
+    sizeStock,
+    variantIds,
+    featured: sorted.some((item) => item.featured),
     grade: "A",
-    sizes: item.size ? [item.size] : ["One"],
+    sizes: sizes.length ? sizes : ["One"],
     colors: [{ name: colorName, hex }],
     occasions: ["Everyday"],
-    image: item.image || "/images/studio-table.jpg",
-    description: item.notes || `${item.name} from the StyleARZ floor — also available in store.`,
+    image: images[0] || "/images/studio-table.jpg",
+    images: images.length ? images : ["/images/studio-table.jpg"],
+    description: primary.notes || `${primary.name} from the StyleARZ floor — also available in store.`,
     details: [
-      item.barcode ? `Barcode ${item.barcode}` : null,
-      item.size ? `Size ${item.size}` : null,
-      item.color ? `Colour ${item.color}` : null,
+      sizes.length > 1 ? `Sizes ${sizes.join(", ")}` : sizes[0] ? `Size ${sizes[0]}` : null,
+      primary.color ? `Colour ${primary.color}` : null,
     ].filter(Boolean),
     source: "inventory",
-    sortOrder: Number.isFinite(item.sortOrder) ? item.sortOrder : 9999,
+    sortOrder: Number.isFinite(primary.sortOrder) ? primary.sortOrder : 9999,
   };
 }
 
@@ -364,10 +437,19 @@ function shopCatalog(db, options = {}) {
   ensureCollections(db);
   ensureSortOrders(db);
   const kind = options.kind; // "sellable" | "display" | "all" | undefined
-  const retail = db.inventoryItems.filter((item) => item.listed !== false).map(toShopProduct);
+  const listed = db.inventoryItems.filter((item) => item.listed !== false);
+  const groups = new Map();
+  listed.forEach((item) => {
+    const key = styleKey(item);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const retail = [...groups.values()].map(toGroupedShopProduct).filter(Boolean);
   let catalog = [
     ...(db.products || []).map((product) => ({
       ...product,
+      images: normalizeImages(product.images, product.image || ""),
+      image: product.image || (Array.isArray(product.images) && product.images[0]) || "/images/studio-table.jpg",
       productKind: productKindOf(product),
       source: product.source || "shop",
       sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 9999,
@@ -393,10 +475,38 @@ function shopCatalog(db, options = {}) {
 
 function findShopProduct(db, id) {
   const product = (db.products || []).find((entry) => entry.id === id);
-  if (product) return { product, kind: "product" };
+  if (product) {
+    return {
+      product: {
+        ...product,
+        images: normalizeImages(product.images, product.image || ""),
+        image: product.image || (Array.isArray(product.images) && product.images[0]) || "/images/studio-table.jpg",
+      },
+      kind: "product",
+    };
+  }
+  const listed = db.inventoryItems.filter((item) => item.listed !== false);
+  const byStyle = listed.filter((item) => (item.styleId || item.id) === id);
+  if (byStyle.length) {
+    return { product: toGroupedShopProduct(byStyle), kind: "inventory", items: byStyle };
+  }
   const item = findById(db, id);
-  if (item && item.listed !== false) return { product: toShopProduct(item), kind: "inventory", item };
+  if (item && item.listed !== false) {
+    const group = listed.filter((entry) => styleKey(entry) === styleKey(item));
+    const items = group.length ? group : [item];
+    return { product: toGroupedShopProduct(items), kind: "inventory", items, item };
+  }
   return null;
+}
+
+/** Resolve the barcode-level inventory row for a shop style + size. */
+function resolveInventoryVariant(db, productId, size) {
+  const found = findShopProduct(db, productId);
+  if (!found || found.kind === "product") return null;
+  const want = String(size || "One");
+  const mappedId = found.product.variantIds && found.product.variantIds[want];
+  if (mappedId) return findById(db, mappedId);
+  return (found.items || []).find((entry) => (entry.size || "One") === want) || found.items?.[0] || null;
 }
 
 function listCategories(db) {
@@ -554,7 +664,34 @@ function deleteItem(db, id, uploadsDir) {
   const [item] = db.inventoryItems.splice(index, 1);
   db.inventoryDeleted.push({ id: item.id, barcode: item.barcode, deletedAt: new Date().toISOString() });
   if (db.inventoryDeleted.length > 500) db.inventoryDeleted = db.inventoryDeleted.slice(-500);
-  if (uploadsDir) removeImageFile(uploadsDir, item.image);
+  if (uploadsDir) itemImages(item).forEach((src) => removeImageFile(uploadsDir, src));
+  return item;
+}
+
+function appendItemImage(db, id, uploadsDir, dataUrl) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const url = saveImageFromBase64(uploadsDir, item.id, dataUrl);
+  const images = itemImages(item);
+  if (images.length >= 8) throw httpError(400, "You can add up to 8 photos per item.");
+  images.push(url);
+  syncItemImages(item, images);
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
+  return item;
+}
+
+function removeItemImageAt(db, id, uploadsDir, index) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const images = itemImages(item);
+  const at = Number(index);
+  if (!Number.isInteger(at) || at < 0 || at >= images.length) throw httpError(400, "Photo not found.");
+  const [removed] = images.splice(at, 1);
+  syncItemImages(item, images);
+  if (uploadsDir) removeImageFile(uploadsDir, removed);
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
   return item;
 }
 
@@ -727,11 +864,17 @@ module.exports = {
   deleteItem,
   addSizes,
   toShopProduct,
+  toGroupedShopProduct,
   shopCatalog,
   ensureSortOrders,
   setCatalogOrder,
   nextSortOrder,
   findShopProduct,
+  resolveInventoryVariant,
+  itemImages,
+  syncItemImages,
+  appendItemImage,
+  removeItemImageAt,
   listCategories,
   addCategory,
   renameCategory,

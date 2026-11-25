@@ -1613,6 +1613,33 @@ textarea {
   object-fit: cover;
 }
 
+.gallery-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(3.25rem, 1fr));
+  gap: 0.4rem;
+  padding: 0.55rem;
+  background: #f3f1ec;
+}
+
+.gallery-thumbs button {
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  background: #fff;
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+
+.gallery-thumbs button.on {
+  border-color: var(--ink);
+}
+
+.gallery-thumbs img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .price {
   font-family: var(--font-display);
   font-size: 1.5rem;
@@ -3092,6 +3119,32 @@ label.inv-photo-frame:hover {
 
 .inv-photo-note {
   margin: 0;
+}
+
+.inv-photo-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.inv-photo-thumb {
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+}
+
+.inv-photo-thumb.is-active {
+  border-color: var(--ink);
+}
+
+.inv-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .inv-photo .error {
@@ -6916,39 +6969,66 @@ label.inv-photo-frame:hover {
   margin: 3mm;
 }
 
+.pos-invoice-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(10, 10, 10, 0.55);
+  overflow: auto;
+}
+
+.pos-invoice-modal-dialog {
+  width: min(100%, 52rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.pos-invoice-panel.is-modal-panel {
+  margin: 0;
+  border: 0;
+}
+
 @media print {
-  body.pos-printing-invoice .site-header,
-  body.pos-printing-invoice .site-footer,
-  body.pos-printing-invoice .toast,
-  body.pos-printing-invoice .drawer-backdrop,
-  body.pos-printing-invoice .pos-header,
-  body.pos-printing-invoice .pos-messages,
-  body.pos-printing-invoice .pos-dual,
-  body.pos-printing-invoice .pos-solo,
-  body.pos-printing-invoice .pos-tabs,
-  body.pos-printing-invoice .pos-prepare-wrap,
-  body.pos-printing-invoice .stat-grid,
-  body.pos-printing-invoice .inv-toolbar,
-  body.pos-printing-invoice .sales-list,
-  body.pos-printing-invoice .admin-nav,
-  body.pos-printing-invoice .page-head,
-  body.pos-printing-invoice .no-print {
+  /* Hide the whole app chrome; only the invoice article is printable. */
+  body.pos-printing-invoice * {
+    visibility: hidden !important;
+  }
+
+  body.pos-printing-invoice .pos-invoice-panel,
+  body.pos-printing-invoice .pos-invoice-panel *,
+  body.pos-printing-invoice .pos-invoice,
+  body.pos-printing-invoice .pos-invoice * {
+    visibility: visible !important;
+  }
+
+  body.pos-printing-invoice .no-print,
+  body.pos-printing-invoice .pos-invoice-toolbar,
+  body.pos-printing-invoice .pos-invoice-stage,
+  body.pos-printing-invoice .pos-invoice-sms {
     display: none !important;
+    visibility: hidden !important;
   }
 
-  body.pos-printing-invoice .page,
-  body.pos-printing-invoice .pos-shell,
-  body.pos-printing-invoice .pos-sales-with-invoice {
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-  }
-
+  body.pos-printing-invoice .pos-invoice-modal,
+  body.pos-printing-invoice .pos-invoice-modal-dialog,
   body.pos-printing-invoice .pos-invoice-panel {
-    border: 0;
-    background: transparent;
-    padding: 0;
-    margin: 0;
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
   body.pos-printing-invoice .pos-invoice {

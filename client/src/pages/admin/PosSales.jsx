@@ -70,9 +70,9 @@ export default function PosSales() {
   const units = shown.reduce((sum, sale) => sum + unitCount(sale), 0);
 
   return (
-    <div className={invoiceSale ? "pos-sales-with-invoice" : ""}>
+    <div>
       {invoiceSale ? (
-        <InvoicePanel sale={invoiceSale} onClose={() => setInvoiceSale(null)} compact />
+        <InvoicePanel sale={invoiceSale} onClose={() => setInvoiceSale(null)} compact asModal />
       ) : null}
 
       <div className="stat-grid">

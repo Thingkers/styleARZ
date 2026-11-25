@@ -1162,20 +1162,50 @@ function EditItem({ id }) {
         <aside className="inv-edit-side">
           <ItemPhoto
             src={shownPhoto}
-            onChange={async (dataUrl) => {
-              setPhoto(dataUrl);
-              setRemovePhoto(false);
-              if (!dataUrl || form.color.trim()) return;
+            images={
+              photo
+                ? [photo, ...((item.images && item.images.length ? item.images : item.image ? [item.image] : []))]
+                : removePhoto
+                  ? []
+                  : item.images && item.images.length
+                    ? item.images
+                    : item.image
+                      ? [item.image]
+                      : []
+            }
+            onAdd={async (dataUrl) => {
+              setError("");
               try {
-                const hint = await colourFromImage(dataUrl);
-                setForm((current) => ({ ...current, color: hint.name, colorHex: hint.hex }));
-                setNotice(`Colour suggested from photo: ${hint.name}`);
-              } catch {
-                /* ignore */
+                const data = await api(`/api/inventory/${id}/images`, { method: "POST", body: { image: dataUrl } });
+                setItem(data.item);
+                setPhoto("");
+                setRemovePhoto(false);
+                setNotice("Photo added.");
+                if (!form.color.trim()) {
+                  try {
+                    const hint = await colourFromImage(dataUrl);
+                    setForm((current) => ({ ...current, color: hint.name, colorHex: hint.hex }));
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              } catch (err) {
+                setError(err.message || "Could not upload photo.");
+                throw err;
               }
             }}
-            onRemove={() => (photo ? setPhoto("") : setRemovePhoto(true))}
-            note={photo ? "New photo uploads when you save." : removePhoto ? "Photo will be removed when you save." : ""}
+            onRemoveAt={async (index) => {
+              setError("");
+              try {
+                const data = await api(`/api/inventory/${id}/images/${index}`, { method: "DELETE" });
+                setItem(data.item);
+                setPhoto("");
+                setNotice("Photo removed.");
+              } catch (err) {
+                setError(err.message || "Could not remove photo.");
+              }
+            }}
+            note="Add up to 8 angles. The first photo is the main shop image."
           />
           <section className="inv-barcode-card">
             <p className="kicker">Barcode</p>

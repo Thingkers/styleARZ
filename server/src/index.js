@@ -48,7 +48,7 @@ app.use(cors({ origin: true }));
 const jsonBody = express.json({ limit: "1mb" });
 // Inventory image uploads carry base64 images and use their own larger parser after auth.
 app.use(async (req, res, next) => {
-  if (req.method === "POST" && /^\/api\/inventory\/[^/]+\/image\/?$/.test(req.path)) return next();
+  if (req.method === "POST" && /^\/api\/inventory\/[^/]+\/images?\/?$/.test(req.path)) return next();
   if (req.method === "POST" && /^\/api\/labels\/?$/.test(req.path)) return next();
   if (req.method === "PATCH" && /^\/api\/labels\/[^/]+\/?$/.test(req.path)) return next();
   if (req.method === "PATCH" && /^\/api\/admin\/home-collections\/[^/]+\/?$/.test(req.path)) return next();
@@ -162,7 +162,7 @@ app.get("/api/products", async (req, res) => {
     if (ao !== bo) return ao - bo;
     return String(a.name).localeCompare(String(b.name));
   });
-  res.json({ products });
+  res.json({ products: withPublicImages(products) });
 });
 
 app.get("/api/products/:id", async (req, res) => {
@@ -176,7 +176,10 @@ app.get("/api/products/:id", async (req, res) => {
         (entry.category === found.product.category || entry.slot === found.product.slot)
     )
     .slice(0, 4);
-  res.json({ product: found.product, related });
+  res.json({
+    product: { ...found.product, image: publicImagePath(found.product.image) },
+    related: withPublicImages(related),
+  });
 });
 
 app.post("/api/fit", async (req, res) => {
@@ -367,7 +370,9 @@ app.post("/api/orders", async (req, res) => {
       shop.stock -= item.qty;
       return;
     }
-    const retail = inventory.findById(db, item.productId);
+    const retail =
+      inventory.resolveInventoryVariant(db, item.productId, item.size) ||
+      inventory.findById(db, item.productId);
     if (retail) retail.stock -= item.qty;
   });
   const order = {
@@ -1023,6 +1028,7 @@ app.patch("/api/admin/posts/:id", requireAdmin, async (req, res) => {
 });
 
 const uploadsDir = path.join(__dirname, "..", "uploads");
+const PLACEHOLDER_IMAGE = "/images/studio-table.jpg";
 fs.mkdirSync(path.join(uploadsDir, "inventory"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "labels"), { recursive: true });
 fs.mkdirSync(path.join(uploadsDir, "home"), { recursive: true });
@@ -1030,9 +1036,38 @@ fs.mkdirSync(path.join(uploadsDir, "offers"), { recursive: true });
 app.use(
   "/uploads",
   express.static(uploadsDir, {
+    fallthrough: false,
     setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
   })
 );
+
+/** Prefer a real file; fall back so shop cards never point at missing uploads. */
+function publicImagePath(image) {
+  const src = String(image || "").trim();
+  if (!src) return PLACEHOLDER_IMAGE;
+  if (src.startsWith("/uploads/")) {
+    const absolute = path.join(uploadsDir, src.replace(/^\/uploads\//, ""));
+    if (!absolute.startsWith(uploadsDir) || !fs.existsSync(absolute)) return PLACEHOLDER_IMAGE;
+  }
+  return src;
+}
+
+function withPublicImages(products) {
+  return (products || []).map((product) => {
+    const images = (Array.isArray(product.images) && product.images.length
+      ? product.images
+      : [product.image]
+    )
+      .map(publicImagePath)
+      .filter(Boolean);
+    const unique = [...new Set(images.length ? images : [PLACEHOLDER_IMAGE])];
+    return {
+      ...product,
+      image: unique[0],
+      images: unique,
+    };
+  });
+}
 
 // Wraps handlers so inventory/POS helpers can throw { status, message, ...extra } errors.
 function handle(fn) {
@@ -1215,11 +1250,29 @@ app.delete("/api/inventory/:id", requireAdmin, handle(async (req, res) => {
 app.post("/api/inventory/:id/image", requireAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
   const item = inventory.findById(db, req.params.id);
   if (!item) return fail(res, 404, "Item not found.");
-  const previous = item.image;
-  item.image = inventory.saveImageFromBase64(uploadsDir, item.id, req.body && req.body.image);
+  const replace = req.body && req.body.replace === true;
+  if (replace || inventory.itemImages(item).length === 0) {
+    const previous = inventory.itemImages(item);
+    const url = inventory.saveImageFromBase64(uploadsDir, item.id, req.body && req.body.image);
+    inventory.syncItemImages(item, [url]);
+    previous.forEach((src) => inventory.removeImageFile(uploadsDir, src));
+  } else {
+    inventory.appendItemImage(db, item.id, uploadsDir, req.body && req.body.image);
+  }
   item.updatedAt = new Date().toISOString();
-  item.version += 1;
-  inventory.removeImageFile(uploadsDir, previous);
+  item.version = (item.version || 1) + 1;
+  await store.save();
+  res.json({ item });
+}));
+
+app.post("/api/inventory/:id/images", requireAdmin, express.json({ limit: "3mb" }), handle(async (req, res) => {
+  const item = inventory.appendItemImage(db, req.params.id, uploadsDir, req.body && req.body.image);
+  await store.save();
+  res.json({ item });
+}));
+
+app.delete("/api/inventory/:id/images/:index", requireAdmin, handle(async (req, res) => {
+  const item = inventory.removeItemImageAt(db, req.params.id, uploadsDir, req.params.index);
   await store.save();
   res.json({ item });
 }));
@@ -1379,6 +1432,16 @@ if (process.env.NODE_ENV === "production") {
   const pub = path.join(__dirname, "..", "public");
   app.use(express.static(pub));
   app.get("*", (req, res) => {
+    // Never SPA-fallback asset/upload paths — missing files must 404, not return index.html
+    // (browsers otherwise treat HTML as a broken image with naturalWidth 0).
+    if (
+      req.path.startsWith("/uploads/") ||
+      req.path.startsWith("/assets/") ||
+      req.path.startsWith("/images/") ||
+      req.path.startsWith("/icons/")
+    ) {
+      return res.status(404).type("text").send("Not found");
+    }
     const indexPath = path.join(pub, "index.html");
     if (!fs.existsSync(indexPath)) {
       return res

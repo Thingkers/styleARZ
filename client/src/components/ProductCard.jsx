@@ -8,7 +8,15 @@ export default function ProductCard({ product }) {
   return (
     <article className="product-card">
       <Link to={`/product/${product.id}`} className="product-media">
-        <img src={product.image} alt={product.name} />
+        <img
+          src={product.image || "/images/studio-table.jpg"}
+          alt={product.name}
+          onError={(event) => {
+            if (event.currentTarget.dataset.fallback === "1") return;
+            event.currentTarget.dataset.fallback = "1";
+            event.currentTarget.src = "/images/studio-table.jpg";
+          }}
+        />
         <span>{product.audience} · {product.category}</span>
       </Link>
       <div className="product-meta">
