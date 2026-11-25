@@ -250,9 +250,62 @@ function syncItemImages(item, images) {
   return item;
 }
 
+function itemImageOriginals(item) {
+  if (!item) return [];
+  return normalizeImages(item.imageOriginals, item.imageOriginal || "");
+}
+
+function syncItemImageOriginals(item, images) {
+  const next = normalizeImages(images, "");
+  item.imageOriginals = next;
+  item.imageOriginal = next[0] || "";
+  return item;
+}
+
+/** Keep current shop images as originals (once), then swap in a new gallery. */
+function replaceItemImagesPreservingOriginals(db, id, uploadsDir, dataUrls) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const list = (Array.isArray(dataUrls) ? dataUrls : []).filter(Boolean);
+  if (!list.length) throw httpError(400, "Send at least one image.");
+  const previous = itemImages(item);
+  if (!itemImageOriginals(item).length && previous.length) {
+    syncItemImageOriginals(item, previous);
+  }
+  const protectedUrls = new Set(itemImageOriginals(item));
+  const nextUrls = list.map((dataUrl) => saveImageFromBase64(uploadsDir, item.id, dataUrl));
+  syncItemImages(item, nextUrls);
+  previous.forEach((src) => {
+    if (!protectedUrls.has(src)) removeImageFile(uploadsDir, src);
+  });
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
+  return item;
+}
+
+function restoreItemImageOriginals(db, id, uploadsDir) {
+  const item = findById(db, id);
+  if (!item) throw httpError(404, "Item not found.");
+  const originals = itemImageOriginals(item);
+  if (!originals.length) throw httpError(400, "No original photo is saved for this item.");
+  const current = itemImages(item);
+  const protectedUrls = new Set(originals);
+  syncItemImages(item, originals);
+  current.forEach((src) => {
+    if (!protectedUrls.has(src)) removeImageFile(uploadsDir, src);
+  });
+  item.updatedAt = new Date().toISOString();
+  item.version = (item.version || 1) + 1;
+  return item;
+}
+
+/** Storefront groups by name + colour + category so separate size rows become one card. */
 function styleKey(item) {
-  if (item.styleId) return `style:${item.styleId}`;
-  return `legacy:${item.name}|${item.color || ""}|${item.category || ""}`;
+  return [
+    String(item.name || "").trim().toLowerCase(),
+    String(item.color || "").trim().toLowerCase(),
+    String(item.category || "").trim().toLowerCase(),
+  ].join("|");
 }
 
 function addSizes(db, id, sizesInput, options = {}) {
@@ -293,6 +346,8 @@ function addSizes(db, id, sizesInput, options = {}) {
       notes: parent.notes,
       image: parent.image || "",
       images: itemImages(parent),
+      imageOriginal: parent.imageOriginal || "",
+      imageOriginals: itemImageOriginals(parent),
       styleId: parent.styleId || parent.id,
       listed: parent.listed !== false,
       featured: Boolean(parent.featured),
@@ -486,17 +541,23 @@ function findShopProduct(db, id) {
     };
   }
   const listed = db.inventoryItems.filter((item) => item.listed !== false);
-  const byStyle = listed.filter((item) => (item.styleId || item.id) === id);
-  if (byStyle.length) {
-    return { product: toGroupedShopProduct(byStyle), kind: "inventory", items: byStyle };
-  }
-  const item = findById(db, id);
-  if (item && item.listed !== false) {
-    const group = listed.filter((entry) => styleKey(entry) === styleKey(item));
-    const items = group.length ? group : [item];
-    return { product: toGroupedShopProduct(items), kind: "inventory", items, item };
-  }
-  return null;
+  const seed =
+    listed.find((item) => (item.styleId || item.id) === id) ||
+    listed.find((item) => item.id === id) ||
+    null;
+  if (!seed) return null;
+
+  // Always expand to the full style group (shared styleId and/or same name+colour+category)
+  // so PDP shows every size and every photo, not just the seed row.
+  const sharedStyle = seed.styleId || seed.id;
+  const key = styleKey(seed);
+  const items = listed.filter(
+    (entry) =>
+      styleKey(entry) === key ||
+      (entry.styleId || entry.id) === sharedStyle ||
+      entry.id === id
+  );
+  return { product: toGroupedShopProduct(items), kind: "inventory", items, item: seed };
 }
 
 /** Resolve the barcode-level inventory row for a shop style + size. */
@@ -874,6 +935,10 @@ module.exports = {
   resolveInventoryVariant,
   itemImages,
   syncItemImages,
+  itemImageOriginals,
+  syncItemImageOriginals,
+  replaceItemImagesPreservingOriginals,
+  restoreItemImageOriginals,
   appendItemImage,
   removeItemImageAt,
   listCategories,
