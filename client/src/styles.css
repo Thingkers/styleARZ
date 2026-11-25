@@ -1602,15 +1602,23 @@ textarea {
 }
 
 .gallery {
+  display: grid;
+  gap: 0;
   background: #e8e4dc;
-  aspect-ratio: 4 / 5;
-  overflow: hidden;
 }
 
-.gallery img {
+.gallery-main {
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: #e8e4dc;
+}
+
+.gallery-main img,
+.gallery > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .gallery-thumbs {
@@ -3119,6 +3127,10 @@ label.inv-photo-frame:hover {
 
 .inv-photo-note {
   margin: 0;
+}
+
+.inv-photo-stage {
+  margin: 0.15rem 0 0;
 }
 
 .inv-photo-thumbs {
@@ -6994,77 +7006,8 @@ label.inv-photo-frame:hover {
   border: 0;
 }
 
-@media print {
-  /* Hide the whole app chrome; only the invoice article is printable. */
-  body.pos-printing-invoice * {
-    visibility: hidden !important;
-  }
-
-  body.pos-printing-invoice .pos-invoice-panel,
-  body.pos-printing-invoice .pos-invoice-panel *,
-  body.pos-printing-invoice .pos-invoice,
-  body.pos-printing-invoice .pos-invoice * {
-    visibility: visible !important;
-  }
-
-  body.pos-printing-invoice .no-print,
-  body.pos-printing-invoice .pos-invoice-toolbar,
-  body.pos-printing-invoice .pos-invoice-stage,
-  body.pos-printing-invoice .pos-invoice-sms {
-    display: none !important;
-    visibility: hidden !important;
-  }
-
-  body.pos-printing-invoice .pos-invoice-modal,
-  body.pos-printing-invoice .pos-invoice-modal-dialog,
-  body.pos-printing-invoice .pos-invoice-panel {
-    position: static !important;
-    inset: auto !important;
-    width: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: #fff !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-
-  body.pos-printing-invoice .pos-invoice {
-    box-shadow: none;
-    border-radius: 0;
-    border: 0;
-    padding: 0;
-    width: 100%;
-    max-width: none;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="a4"] {
-    page: invoice-a4;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="a5"] {
-    page: invoice-a5;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="letter"] {
-    page: invoice-letter;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="t-58"] {
-    page: invoice-t-58;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="t-58"] .pos-invoice-item img,
-  body.pos-printing-invoice[data-invoice-preset="t-80"] .pos-invoice-item img {
-    display: none;
-  }
-
-  body.pos-printing-invoice[data-invoice-preset="t-80"] {
-    page: invoice-t-80;
-  }
-}
+/* Invoice printing uses an isolated iframe (see printInvoice.js) so the admin
+   layout cannot create blank Letter/A4 pages behind a thermal receipt. */
 
 /* Admin toggle switches + settings */
 .admin-toggle {
