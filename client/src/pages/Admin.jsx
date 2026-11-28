@@ -81,7 +81,7 @@ const ADMIN_SECTIONS = [
       path.startsWith("/admin/usb-scanner") ||
       path.startsWith("/admin/users"),
     links: [
-      { to: "/admin/settings", label: "Settings", hint: "SMS sender" },
+      { to: "/admin/settings", label: "Settings", hint: "SMS and printer" },
       { to: "/admin/messages", label: "Messages", hint: "Bulk SMS" },
       { to: "/admin/offers", label: "Offers", hint: "Grand opening" },
       { to: "/admin/categories", label: "Categories", hint: "Catalog groups" },

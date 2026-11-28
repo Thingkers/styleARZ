@@ -1,9 +1,10 @@
 /** Isolated invoice print — avoids blank A4 pages from the admin layout. */
 
 function pageRule(preset, heightMm) {
-  const margin = preset.kind === "thermal" ? "2mm" : preset.id === "letter" ? "0.4in" : preset.id === "a5" ? "8mm" : "10mm";
+  // Rolls get zero page margin (padding lives inside the receipt) so Chrome has no room for headers/footers.
+  const margin = preset.kind === "thermal" ? "0" : preset.id === "letter" ? "0.4in" : preset.id === "a5" ? "8mm" : "10mm";
   if (preset.kind === "thermal") {
-    const h = Math.max(40, Math.min(600, Math.ceil(heightMm || 120)));
+    const h = Math.max(25, Math.min(600, Math.ceil(heightMm || 120)));
     return `@page { size: ${preset.w}mm ${h}mm; margin: ${margin}; }`;
   }
   if (preset.id === "letter") return `@page { size: letter; margin: ${margin}; }`;
@@ -12,15 +13,17 @@ function pageRule(preset, heightMm) {
 }
 
 function printWidthMm(preset) {
-  if (preset.kind === "thermal") return Math.max(40, preset.w - 4);
+  if (preset.kind === "thermal") return Math.max(28, preset.w);
   if (preset.id === "a5") return 132;
   if (preset.id === "letter") return 196;
   return 190;
 }
 
-function invoicePrintCss(preset, heightMm) {
+function invoicePrintCss(preset, heightMm, topMm) {
   const width = printWidthMm(preset);
   const thermal = preset.kind === "thermal";
+  const narrow = thermal && preset.w < 50;
+  const top = thermal ? Math.min(8, Math.max(2, Number(topMm) || 3)) : 0;
   return `
     ${pageRule(preset, heightMm)}
     html, body {
@@ -30,21 +33,21 @@ function invoicePrintCss(preset, heightMm) {
       color: #111 !important;
       width: ${width}mm !important;
       max-width: ${width}mm !important;
-      overflow: hidden !important;
+      ${thermal ? "overflow: hidden !important;" : ""}
     }
     * { box-sizing: border-box; }
     .pos-invoice {
       width: ${width}mm !important;
       max-width: ${width}mm !important;
       margin: 0 !important;
-      padding: ${thermal ? "1.5mm" : "4mm"} !important;
+      padding: ${thermal ? `${top}mm 3.5mm 3mm` : "4mm"} !important;
       border: 0 !important;
       border-radius: 0 !important;
       box-shadow: none !important;
       background: #fff !important;
       color: #111 !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: ${thermal ? "10px" : "12px"} !important;
+      font-size: ${narrow ? "8px" : thermal ? "10px" : "12px"} !important;
       line-height: 1.35;
     }
     .pos-invoice-head {
@@ -89,6 +92,9 @@ function invoicePrintCss(preset, heightMm) {
       text-align: right;
       white-space: nowrap;
     }
+    .pos-invoice-table thead { display: table-header-group; }
+    .pos-invoice-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .pos-invoice-totals, .pos-invoice-grand { break-inside: avoid; page-break-inside: avoid; }
     .pos-invoice-item { display: block; }
     .pos-invoice-item img { display: none !important; }
     .pos-invoice-table small { display: block; color: #777; margin-top: 0.1rem; }
@@ -124,7 +130,7 @@ function pxToMm(px) {
  * @param {{ id: string, kind: string, w?: number, h?: number, label?: string }} preset
  * @param {string} [title]
  */
-export function printInvoiceElement(sourceEl, preset, title = "Invoice") {
+export function printInvoiceElement(sourceEl, preset, title = "Invoice", topMm = 3) {
   if (!sourceEl || !preset) return;
 
   const existing = document.getElementById("sa-invoice-print-frame");
@@ -150,7 +156,7 @@ export function printInvoiceElement(sourceEl, preset, title = "Invoice") {
   clone.querySelectorAll("img").forEach((img) => img.remove());
 
   // First pass: measure content height at roll/sheet width
-  const measureCss = invoicePrintCss(preset, 200);
+  const measureCss = invoicePrintCss(preset, 200, topMm);
   doc.open();
   doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${String(title).replace(/[<>&"]/g, "")}</title>
     <style>${measureCss}</style></head><body></body></html>`);
@@ -169,7 +175,7 @@ export function printInvoiceElement(sourceEl, preset, title = "Invoice") {
   const run = () => {
     const heightMm = Math.ceil(pxToMm(doc.body.scrollHeight) + (preset.kind === "thermal" ? 8 : 12));
     const style = doc.querySelector("style");
-    if (style) style.textContent = invoicePrintCss(preset, heightMm);
+    if (style) style.textContent = invoicePrintCss(preset, heightMm, topMm);
     // Allow layout to settle with final @page height
     window.setTimeout(finish, 50);
   };

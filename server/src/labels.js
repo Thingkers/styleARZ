@@ -71,7 +71,7 @@ function saveImageFromBase64(uploadsDir, draftId, dataUrl) {
   if (!safeId) throw httpError(400, "Invalid draft.");
   const dir = path.join(uploadsDir, "labels");
   fs.mkdirSync(dir, { recursive: true });
-  const name = `${safeId}-${Date.now().toString(36)}.${ext}`;
+  const name = `${safeId}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`;
   fs.writeFileSync(path.join(dir, name), buffer);
   return `${IMAGE_URL_PREFIX}${name}`;
 }
@@ -98,7 +98,7 @@ function copyImageToInventory(uploadsDir, imagePath, inventoryId) {
   const safeId = String(inventoryId).replace(/[^a-zA-Z0-9_-]/g, "") || "item";
   const dir = path.join(uploadsDir, "inventory");
   fs.mkdirSync(dir, { recursive: true });
-  const name = `${safeId}-${Date.now().toString(36)}.${ext}`;
+  const name = `${safeId}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`;
   fs.copyFileSync(source, path.join(dir, name));
   return `/uploads/inventory/${name}`;
 }

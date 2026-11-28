@@ -145,14 +145,50 @@ function cleanBarcode(value) {
   return code;
 }
 
+/*
+ * Position indexes over db.inventoryItems, rebuilt when the array or its length changes.
+ * A hit is only trusted after re-checking the item at that position, and any miss falls
+ * back to a full scan, so in-place edits (barcode changes, splices) can never return a
+ * wrong item — at worst a lookup costs the same as the old linear search.
+ */
+const itemIndexes = new WeakMap();
+
+function itemIndex(list) {
+  let index = itemIndexes.get(list);
+  if (!index || index.length !== list.length) {
+    index = { length: list.length, byId: new Map(), byBarcode: new Map() };
+    list.forEach((item, position) => {
+      if (!item) return;
+      if (!index.byId.has(item.id)) index.byId.set(item.id, position);
+      const code = String(item.barcode).toUpperCase();
+      if (!index.byBarcode.has(code)) index.byBarcode.set(code, position);
+    });
+    itemIndexes.set(list, index);
+  }
+  return index;
+}
+
+function indexedFind(list, positions, key, matches) {
+  const position = positions.get(key);
+  if (position !== undefined) {
+    const candidate = list[position];
+    if (candidate && matches(candidate)) return candidate;
+  }
+  const found = list.find(matches) || null;
+  if (found || position !== undefined) itemIndexes.delete(list);
+  return found;
+}
+
 function findByBarcode(db, code) {
   const wanted = String(code || "").trim().toUpperCase();
   if (!wanted) return null;
-  return (db.inventoryItems || []).find((item) => String(item.barcode).toUpperCase() === wanted) || null;
+  const list = db.inventoryItems || [];
+  return indexedFind(list, itemIndex(list).byBarcode, wanted, (item) => String(item.barcode).toUpperCase() === wanted);
 }
 
 function findById(db, id) {
-  return (db.inventoryItems || []).find((item) => item.id === id) || null;
+  const list = db.inventoryItems || [];
+  return indexedFind(list, itemIndex(list).byId, id, (item) => item.id === id);
 }
 
 function assertUnique(db, field, value, selfId, options = {}) {
@@ -780,7 +816,7 @@ function saveImageFromBase64(uploadsDir, itemId, dataUrl, folder = "inventory") 
   const safeFolder = folder === "home" ? "home" : folder === "offers" ? "offers" : "inventory";
   const dir = path.join(uploadsDir, safeFolder);
   fs.mkdirSync(dir, { recursive: true });
-  const name = `${safeId}-${Date.now().toString(36)}.${ext}`;
+  const name = `${safeId}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`;
   fs.writeFileSync(path.join(dir, name), buffer);
   return `/uploads/${safeFolder}/${name}`;
 }

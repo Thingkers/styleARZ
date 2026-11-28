@@ -24,6 +24,14 @@ export const CATEGORY_AUDIENCE_RULES = {
 };
 export const CATEGORIES = Object.keys(CATEGORY_AUDIENCE_RULES);
 export const QUICK_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "One", "Free"];
+export const WAIST_SIZES = ["28", "30", "32", "34", "36", "38", "40", "42", "44"];
+
+const WAIST_CATEGORY = /pant|trouser|jean|chino|bottom/i;
+
+/** Pants, trousers and jeans use waist inches. Shirts keep letter sizes. */
+export function sizesForCategory(category) {
+  return WAIST_CATEGORY.test(String(category || "")) ? WAIST_SIZES : QUICK_SIZES;
+}
 
 export function categoryName(entry) {
   return typeof entry === "string" ? entry : entry?.name || "";

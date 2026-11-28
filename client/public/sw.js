@@ -1,5 +1,5 @@
 // StyleARZ POS service worker: caches the app shell so /pos and /pos/scan open offline.
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `sa-shell-${VERSION}`;
 const ASSET_CACHE = `sa-assets-${VERSION}`;
 const API_CACHE = `sa-api-${VERSION}`;

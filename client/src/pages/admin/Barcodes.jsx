@@ -4,21 +4,39 @@ import { api } from "../../api";
 import { money } from "../../format";
 import { Empty, Loading } from "../../components/ui";
 import { barcodeSrc, fetchBarcodes, variantText } from "./inventoryUtils";
+import { labelOrientation, printAlignmentTest, printLabelSheet, resolveLabelPreset } from "./printLabels";
+import { loadPrinterSettings, paperFromJob } from "./printerSettings";
+import LabelPaperPicker from "./LabelPaperPicker";
+import PrinterSetupHelp from "./PrinterSetupHelp";
 
 const MAX_COPIES = 50;
 const MAX_LABELS = 600;
+const PRESET_STORAGE_KEY = "sa-barcode-preset-v2";
+const CUSTOM_STORAGE_KEY = "sa-barcode-custom-size";
 
-function BarcodeLabel({ label }) {
-  const variant = variantText(label);
+function loadCustomSize() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CUSTOM_STORAGE_KEY) || "null");
+    if (saved && saved.w && saved.h) return { w: String(saved.w), h: String(saved.h) };
+  } catch {
+    /* ignore */
+  }
+  return { w: "38", h: "25" };
+}
+
+function BarcodeLabel({ label, shape, turned }) {
+  const meta = [variantText(label), label.barcode].filter(Boolean).join(" · ");
   return (
-    <article className="barcode-label">
+    <article className={`ql-label is-${shape || "wide"}${turned ? " is-turned" : ""}`}>
+      <div className="ql-label-face">
       <header>
-        <span>StyleARZ</span>
+        <span className="ql-brand-text">STYLEARZ</span>
         <strong>{money(label.price)}</strong>
       </header>
-      <p className="barcode-name">{label.name}</p>
-      {variant && <p className="barcode-meta">{variant}</p>}
-      <img src={barcodeSrc(label.svg)} alt={`Barcode ${label.barcode}`} />
+      <p className="ql-label-name">{label.name}</p>
+      <p className="ql-label-size">{meta || "—"}</p>
+      <img className="ql-label-barcode" src={barcodeSrc(label.svg)} alt={`Barcode ${label.barcode}`} />
+      </div>
     </article>
   );
 }
@@ -29,12 +47,50 @@ export default function Barcodes() {
   const [selected, setSelected] = useState(() => new Set((searchParams.get("ids") || "").split(",").filter(Boolean)));
   const [labels, setLabels] = useState({});
   const [query, setQuery] = useState("");
+  const [presetId, setPresetId] = useState(() => localStorage.getItem(PRESET_STORAGE_KEY) || "t-38x25");
+  const [custom, setCustom] = useState(loadCustomSize);
+  const [orientation, setOrientation] = useState(() => localStorage.getItem("sa-barcode-orient") || "landscape");
+  const [topGap, setTopGap] = useState(() => localStorage.getItem("sa-barcode-gap") || "2.5");
+  const [shopJob, setShopJob] = useState(null);
   const [copies, setCopies] = useState("1");
   const [matchStock, setMatchStock] = useState(false);
   const [error, setError] = useState("");
   const location = useLocation();
   const [notice] = useState(location.state?.notice || "");
   const requested = useRef(new Set());
+  const sheetRef = useRef(null);
+
+  const shopPaper = paperFromJob(shopJob);
+  const preset = presetId === "shop" && shopPaper ? shopPaper : resolveLabelPreset(presetId, custom);
+  const printOrientation = preset.id === "shop" ? "landscape" : orientation;
+  const printGap = preset.id === "shop" ? preset.topGap : topGap;
+  const orient = labelOrientation(preset, printOrientation);
+  const shape = preset.kind === "thermal" ? orient.shape : preset.shape || (preset.h > preset.w ? "tall" : "wide");
+
+  useEffect(() => {
+    localStorage.setItem(PRESET_STORAGE_KEY, presetId);
+  }, [presetId]);
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(custom));
+  }, [custom]);
+
+  useEffect(() => {
+    localStorage.setItem("sa-barcode-orient", orientation);
+  }, [orientation]);
+
+  useEffect(() => {
+    localStorage.setItem("sa-barcode-gap", topGap);
+  }, [topGap]);
+
+  useEffect(() => {
+    loadPrinterSettings()
+      .then((printer) => {
+        setShopJob(printer.label);
+        setPresetId("shop");
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     api("/api/inventory")
@@ -117,8 +173,60 @@ export default function Barcodes() {
   }
 
   return (
-    <div className="barcode-page">
+    <div className={`barcode-page preset-${preset.id}`}>
       {notice && <p className="notice no-print">{notice}</p>}
+      <section className="label-print-bar no-print" aria-label="Print settings">
+        <div className="label-print-controls">
+          <LabelPaperPicker
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            custom={custom}
+            onCustomChange={setCustom}
+            preset={preset}
+            orientation={orientation}
+            onOrientationChange={setOrientation}
+            topGap={topGap}
+            onTopGapChange={setTopGap}
+            shopJob={shopJob}
+          />
+          <label>
+            Copies of each label
+            <input
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max={MAX_COPIES}
+              value={copies}
+              disabled={matchStock}
+              onChange={(event) => setCopies(event.target.value)}
+            />
+          </label>
+          <label className="inv-check">
+            <input type="checkbox" checked={matchStock} onChange={(event) => setMatchStock(event.target.checked)} />
+            One label per unit in stock
+          </label>
+          <div className="label-print-actions">
+            <button
+              type="button"
+              className="btn solid"
+              disabled={!sheet.length || pending}
+              onClick={() => printLabelSheet(sheetRef.current, preset, `StyleARZ Barcodes (${sheet.length})`, printOrientation, printGap)}
+            >
+              {pending ? "Preparing labels…" : `Print ${sheet.length} ${sheet.length === 1 ? "label" : "labels"}`}
+            </button>
+            <button type="button" className="text-link" onClick={() => printAlignmentTest(preset, printOrientation, printGap)}>
+              Print alignment test
+            </button>
+          </div>
+        </div>
+        {wanted > MAX_LABELS && (
+          <p className="warn">
+            That's {wanted} labels. Only the first {MAX_LABELS} are shown; print in smaller batches.
+          </p>
+        )}
+        {error && <p className="error">{error}</p>}
+        <PrinterSetupHelp preset={preset} />
+      </section>
       <section className="barcode-picker no-print">
         <div className="barcode-picker-head">
           <h2>Choose items</h2>
@@ -166,52 +274,43 @@ export default function Barcodes() {
           })}
           {shown.length === 0 && <li className="muted">No items match “{query.trim()}”.</li>}
         </ul>
-        <div className="barcode-options">
-          <label>
-            Copies of each label
-            <input
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max={MAX_COPIES}
-              value={copies}
-              disabled={matchStock}
-              onChange={(event) => setCopies(event.target.value)}
-            />
-          </label>
-          <label className="inv-check">
-            <input type="checkbox" checked={matchStock} onChange={(event) => setMatchStock(event.target.checked)} />
-            One label per unit in stock
-          </label>
-          {wanted > MAX_LABELS && (
-            <p className="warn">
-              That's {wanted} labels. Only the first {MAX_LABELS} are shown; print in smaller batches.
-            </p>
-          )}
-          {error && <p className="error">{error}</p>}
-          <button
-            type="button"
-            className="btn solid"
-            disabled={!sheet.length || pending}
-            onClick={() => window.print()}
-          >
-            {pending ? "Preparing labels…" : `Print ${sheet.length} ${sheet.length === 1 ? "label" : "labels"}`}
-          </button>
-        </div>
       </section>
 
       <section className="barcode-preview">
         <div className="section-head no-print">
           <h2>Preview</h2>
-          <p className="muted">Code 128 · prints three across on A4 or Letter</p>
+          <p className="muted">
+            {preset.label}
+            {shape === "tall"
+              ? " · vertical narrow hang-tag paper"
+              : preset.kind === "thermal"
+                ? " · roll sticker"
+                : " · A4 sheet"}
+          </p>
         </div>
         {sheet.length === 0 ? (
           <p className="muted no-print">{pending ? "Preparing labels…" : "Select items to preview their labels."}</p>
         ) : (
-          <div className="barcode-sheet">
-            {sheet.map(({ key, label }) => (
-              <BarcodeLabel key={key} label={label} />
-            ))}
+          <div className={`ql-paper-stage kind-${preset.kind} shape-${shape}`} aria-label="Paper print preview">
+            <div
+              ref={sheetRef}
+              className="ql-sheet"
+              style={{
+                "--ql-cols": preset.cols || 1,
+                "--ql-rows": preset.rows || 1,
+                "--ql-w": preset.w,
+                "--ql-h": preset.h,
+                "--ql-w-mm": `${preset.w}mm`,
+                "--ql-h-mm": `${preset.h}mm`,
+                "--ql-top": `${Math.min(6, Math.max(0, Number(printGap) || 0))}mm`,
+              }}
+              data-kind={preset.kind}
+              data-shape={shape}
+            >
+              {sheet.map(({ key, label }) => (
+                <BarcodeLabel key={key} label={label} shape={shape} turned={orient.turned} />
+              ))}
+            </div>
           </div>
         )}
       </section>
