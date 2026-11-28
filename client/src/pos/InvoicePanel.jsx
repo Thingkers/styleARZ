@@ -2,14 +2,29 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { money, prettyDateTime } from "../format";
 import { printInvoiceElement } from "./printInvoice";
+import PrinterSetupHelp from "../pages/admin/PrinterSetupHelp";
+import { invoicePaperFromJob, loadPrinterSettings } from "../pages/admin/printerSettings";
 
 const INVOICE_PRESETS = [
   { id: "a4", label: "A4 (210×297 mm)", kind: "sheet", w: 210, h: 297 },
   { id: "a5", label: "A5 (148×210 mm)", kind: "sheet", w: 148, h: 210 },
   { id: "letter", label: "Letter (8.5×11 in)", kind: "sheet", w: 215.9, h: 279.4 },
+  { id: "t-56", label: "Thermal 56 mm POS roll (153.08.761.224)", kind: "thermal", w: 56 },
+  { id: "t-38", label: "Thermal 38 mm roll", kind: "thermal", w: 38 },
   { id: "t-58", label: "Thermal 58 mm roll", kind: "thermal", w: 58 },
+  { id: "t-76", label: "Thermal 76 mm roll", kind: "thermal", w: 76 },
   { id: "t-80", label: "Thermal 80 mm roll", kind: "thermal", w: 80 },
 ];
+
+const CUSTOM_ROLL_ID = "custom-roll";
+
+function resolveInvoicePreset(id, customWidth) {
+  if (id === CUSTOM_ROLL_ID) {
+    const w = Math.min(120, Math.max(30, Number(customWidth) || 58));
+    return { id: CUSTOM_ROLL_ID, label: `Custom roll ${w} mm`, kind: "thermal", w };
+  }
+  return INVOICE_PRESETS.find((entry) => entry.id === id) || INVOICE_PRESETS[0];
+}
 
 function unitCount(sale) {
   return (sale?.items || []).reduce((sum, line) => sum + Number(line.qty || 0), 0);
@@ -33,7 +48,29 @@ export default function InvoicePanel({
   const [presetId, setPresetId] = useState(() => localStorage.getItem("sa-invoice-preset") || "a4");
   const [senderPhone, setSenderPhone] = useState("");
 
-  const preset = INVOICE_PRESETS.find((entry) => entry.id === presetId) || INVOICE_PRESETS[0];
+  const [customWidth, setCustomWidth] = useState(() => localStorage.getItem("sa-invoice-custom-width") || "58");
+  const [topGap, setTopGap] = useState(() => localStorage.getItem("sa-invoice-gap") || "3");
+  const [shopJob, setShopJob] = useState(null);
+  const shopPaper = invoicePaperFromJob(shopJob);
+  const preset = presetId === "shop" && shopPaper ? shopPaper : resolveInvoicePreset(presetId, customWidth);
+  const printGap = preset.id === "shop" ? preset.topGap : topGap;
+
+  useEffect(() => {
+    localStorage.setItem("sa-invoice-custom-width", String(customWidth));
+  }, [customWidth]);
+
+  useEffect(() => {
+    localStorage.setItem("sa-invoice-gap", String(topGap));
+  }, [topGap]);
+
+  useEffect(() => {
+    loadPrinterSettings()
+      .then((printer) => {
+        setShopJob(printer.invoice);
+        setPresetId((current) => (current === "a4" || current === "a5" || current === "letter" ? current : "shop"));
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     setPhone(sale?.customerPhone || "");
@@ -48,15 +85,15 @@ export default function InvoicePanel({
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("sa-invoice-preset", preset.id);
-  }, [preset.id]);
+    localStorage.setItem("sa-invoice-preset", presetId);
+  }, [presetId]);
 
   if (!sale) return null;
 
   function printInvoice() {
     const source = document.getElementById("pos-invoice-print");
     if (!source) return;
-    printInvoiceElement(source, preset, sale.receiptNo || sale.id || "Invoice");
+    printInvoiceElement(source, preset, sale.receiptNo || sale.id || "Invoice", printGap);
   }
 
   const canSms = Boolean(sale.id) && !String(sale.id).startsWith("offline_");
@@ -104,13 +141,46 @@ export default function InvoicePanel({
           <label className="pos-invoice-preset">
             Paper size
             <select value={preset.id} onChange={(event) => setPresetId(event.target.value)}>
+              {shopJob ? (
+                <option value="shop">
+                  Shop setting · {shopJob.name} ({shopJob.w} mm)
+                </option>
+              ) : null}
               {INVOICE_PRESETS.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}
                 </option>
               ))}
+              <option value={CUSTOM_ROLL_ID}>Custom roll width (mm)…</option>
             </select>
           </label>
+          {presetId === CUSTOM_ROLL_ID && (
+            <label className="pos-invoice-preset">
+              Roll width (mm)
+              <input
+                type="number"
+                inputMode="decimal"
+                min="30"
+                max="120"
+                value={customWidth}
+                onChange={(event) => setCustomWidth(event.target.value)}
+              />
+            </label>
+          )}
+          {preset.kind === "thermal" && preset.id !== "shop" && (
+            <label className="pos-invoice-preset">
+              Top gap (mm)
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                max="8"
+                step="0.5"
+                value={topGap}
+                onChange={(event) => setTopGap(event.target.value)}
+              />
+            </label>
+          )}
           <button className="btn solid pos-tap" type="button" onClick={printInvoice}>
             Print invoice
           </button>
@@ -122,13 +192,14 @@ export default function InvoicePanel({
         </div>
       </div>
 
-      <div className="pos-invoice-stage no-print" aria-hidden="true">
+      <div className="pos-invoice-stage no-print">
         <p className="muted">
           Preview · {preset.label}
           {preset.kind === "thermal"
-            ? " · receipt roll — print opens a roll-sized page (set Margins to None, uncheck headers)"
-            : " · sheet"}
+            ? " · prints as one page the length of the receipt"
+            : " · sheet — long invoices continue onto extra pages with the item header repeated"}
         </p>
+        <PrinterSetupHelp preset={preset} kind="invoice" />
       </div>
 
       <article

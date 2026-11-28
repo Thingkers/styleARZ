@@ -44,28 +44,25 @@ function isValidStyleBarcode(code) {
   return checkDigit(body) === Number(digits.slice(-1));
 }
 
-function isTaken(db, code) {
-  const upper = code.toUpperCase();
-  if ((db.inventoryItems || []).some((item) => String(item.barcode || "").toUpperCase() === upper)) {
-    return true;
-  }
+function takenBarcodes(db) {
+  const taken = new Set();
+  (db.inventoryItems || []).forEach((item) => taken.add(String(item.barcode || "").toUpperCase()));
   // Active quick-label drafts reserve barcodes until they are converted or deleted.
-  return (db.labelDrafts || []).some(
-    (draft) =>
-      draft &&
-      draft.status !== "converted" &&
-      String(draft.barcode || "").toUpperCase() === upper
-  );
+  (db.labelDrafts || []).forEach((draft) => {
+    if (draft && draft.status !== "converted") taken.add(String(draft.barcode || "").toUpperCase());
+  });
+  return taken;
 }
 
 // Allocates the next unique SA barcode and advances db.inventorySeq.
 function allocateBarcode(db) {
   if (!Number.isFinite(db.inventorySeq)) db.inventorySeq = 1000;
+  const taken = takenBarcodes(db);
   let code;
   do {
     db.inventorySeq += 1;
     code = makeBarcode(db.inventorySeq);
-  } while (isTaken(db, code));
+  } while (taken.has(code.toUpperCase()));
   return code;
 }
 

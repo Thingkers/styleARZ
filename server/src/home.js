@@ -122,7 +122,7 @@ function saveImageFromBase64(uploadsDir, collectionId, dataUrl) {
   const safeId = String(collectionId).replace(/[^a-zA-Z0-9_-]/g, "") || "home";
   const dir = path.join(uploadsDir, "home");
   fs.mkdirSync(dir, { recursive: true });
-  const name = `${safeId}-${Date.now().toString(36)}.${ext}`;
+  const name = `${safeId}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`;
   fs.writeFileSync(path.join(dir, name), buffer);
   return `${IMAGE_URL_PREFIX}${name}`;
 }

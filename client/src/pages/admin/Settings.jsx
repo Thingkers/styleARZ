@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { Loading } from "../../components/ui";
+import PrinterSettingsForm from "./PrinterSettingsForm";
 
 export default function Settings() {
   const [smsSenderPhone, setSmsSenderPhone] = useState("");
@@ -81,6 +82,8 @@ export default function Settings() {
           {busy ? "Saving…" : "Save SMS number"}
         </button>
       </form>
+
+      <PrinterSettingsForm />
 
       <section className="admin-settings-card">
         <h3>Connect a live gateway</h3>
