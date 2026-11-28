@@ -15,6 +15,7 @@ const broadcast = require("./broadcast");
 const barcode = require("./barcode");
 const offers = require("./offers");
 const roles = require("./roles");
+const { normalizePrinter } = require("./printerSettings");
 const { productMatchesCategory, categoriesMatch } = require("./categoryMatch");
 
 function loadEnv() {
@@ -657,6 +658,7 @@ app.get("/api/admin/settings", requireSuperAdmin, async (req, res) => {
   res.json({
     settings: {
       smsSenderPhone: String(settings.smsSenderPhone || "").trim(),
+      printer: normalizePrinter(settings.printer),
     },
     sms: {
       provider: String(process.env.SMS_PROVIDER || "log"),
@@ -680,12 +682,29 @@ app.put("/api/admin/settings", requireSuperAdmin, handle(async (req, res) => {
   };
   await store.save();
   res.json({
-    settings: db.settings,
+    settings: {
+      ...db.settings,
+      printer: normalizePrinter(db.settings.printer),
+    },
     sms: {
       provider: String(process.env.SMS_PROVIDER || "log"),
       configured: sms.smsConfigured(),
     },
   });
+}));
+
+app.get("/api/admin/printer", requireAdmin, async (req, res) => {
+  res.json({ printer: normalizePrinter(db.settings?.printer) });
+});
+
+app.put("/api/admin/printer", requireAdmin, handle(async (req, res) => {
+  const printer = normalizePrinter(req.body && req.body.printer);
+  db.settings = {
+    ...(db.settings && typeof db.settings === "object" ? db.settings : {}),
+    printer,
+  };
+  await store.save();
+  res.json({ printer });
 }));
 
 app.get("/api/admin/messages", requireSuperAdmin, handle(async (_req, res) => {
@@ -1079,6 +1098,7 @@ app.use(
   "/uploads",
   express.static(uploadsDir, {
     fallthrough: false,
+    maxAge: "7d",
     setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
   })
 );
@@ -1493,7 +1513,16 @@ app.use("/api", async (req, res) => {
 
 if (process.env.NODE_ENV === "production") {
   const pub = path.join(__dirname, "..", "public");
-  app.use(express.static(pub));
+  app.use(
+    express.static(pub, {
+      setHeaders: (res, filePath) => {
+        // Vite emits content-hashed names under /assets, so they never change in place.
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    })
+  );
   app.get("*", (req, res) => {
     // Never SPA-fallback asset/upload paths — missing files must 404, not return index.html
     // (browsers otherwise treat HTML as a broken image with naturalWidth 0).

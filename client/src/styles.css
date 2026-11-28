@@ -3810,14 +3810,21 @@ label.inv-photo-frame:hover {
   .shell:has(.barcode-page) > .drawer-backdrop,
   .shell:has(.barcode-page) .page-head,
   .shell:has(.barcode-page) .admin-nav,
+  .shell:has(.barcode-page) .admin-dash-head,
+  .shell:has(.barcode-page) .admin-dash-side,
   .barcode-page .no-print {
     display: none !important;
   }
 
-  .shell:has(.barcode-page) .page {
-    width: auto;
-    margin: 0;
-    padding: 0;
+  .shell:has(.barcode-page) .page,
+  .shell:has(.barcode-page) .admin-dashboard,
+  .shell:has(.barcode-page) .admin-dash-layout,
+  .shell:has(.barcode-page) .admin-dash-main {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .barcode-page {
@@ -6226,11 +6233,37 @@ label.inv-photo-frame:hover {
   height: var(--ql-h-mm, 60mm);
   max-width: 100%;
   margin: 0 auto;
+  padding: var(--ql-top, 2.5mm) 1.5mm 1.2mm;
   border-bottom: 1px dashed #b7b0a4;
 }
 
 .ql-sheet[data-kind="thermal"] .ql-label:last-child {
   border-bottom: 0;
+}
+
+.ql-label-face {
+  display: contents;
+}
+
+.ql-label.is-turned {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.ql-label.is-turned .ql-label-face {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  flex: 0 0 auto;
+  width: calc(var(--ql-h-mm, 25mm) - var(--ql-top, 2.5mm) - 1.6mm);
+  height: calc(var(--ql-w-mm, 38mm) - 3.4mm);
+  max-width: none;
+  max-height: none;
+  gap: 0.6mm;
+  padding: 1mm 1.2mm;
+  transform: rotate(90deg);
+  overflow: hidden;
 }
 
 .ql-label {
@@ -6270,40 +6303,14 @@ label.inv-photo-frame:hover {
   min-width: 0;
 }
 
-.ql-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 1mm;
-  min-width: 0;
-}
-
-.ql-brand-mark {
-  flex: 0 0 auto;
-  width: 3.2mm;
-  height: 3.2mm;
-  border: 0.35mm solid #ff6600;
-  background:
-    linear-gradient(135deg, #ff6600 0 35%, transparent 35% 65%, #111 65%);
-}
-
 .ql-brand-text {
-  display: inline-flex;
-  align-items: baseline;
-  font-size: 5.5pt;
-  letter-spacing: 0.04em;
+  min-width: 0;
+  font-size: 6.5pt;
+  font-weight: 700;
+  letter-spacing: 0.03em;
   line-height: 1;
+  color: #000;
   white-space: nowrap;
-}
-
-.ql-brand-text em {
-  font-style: normal;
-  font-weight: 700;
-  color: #111;
-}
-
-.ql-brand-text b {
-  font-weight: 700;
-  color: #ff6600;
 }
 
 .ql-label header strong {
@@ -6410,14 +6417,21 @@ label.inv-photo-frame:hover {
   .shell:has(.ql-page) > .drawer-backdrop,
   .shell:has(.ql-page) .page-head,
   .shell:has(.ql-page) .admin-nav,
+  .shell:has(.ql-page) .admin-dash-head,
+  .shell:has(.ql-page) .admin-dash-side,
   .ql-page .no-print {
     display: none !important;
   }
 
-  .shell:has(.ql-page) .page {
-    width: auto;
-    margin: 0;
-    padding: 0;
+  .shell:has(.ql-page) .page,
+  .shell:has(.ql-page) .admin-dashboard,
+  .shell:has(.ql-page) .admin-dash-layout,
+  .shell:has(.ql-page) .admin-dash-main {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .ql-page {
@@ -6489,10 +6503,6 @@ label.inv-photo-frame:hover {
     page-break-inside: avoid;
   }
 
-  .ql-brand-mark {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
 }
 
 @page ql-thermal-40x30 {
@@ -9297,10 +9307,167 @@ label.inv-photo-frame:hover {
   }
 }
 
+.printer-job {
+  border: 1px solid var(--line);
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.printer-job legend {
+  font-weight: 700;
+  padding: 0 0.3rem;
+}
+
+.printer-job-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.printer-job-grid label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.printer-job-grid input,
+.printer-job-grid select {
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--ink);
+}
+
+.label-shop-note {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.84rem;
+}
+
 .admin-offer-upload {
   display: grid;
   gap: 0.65rem;
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.label-custom-size {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.label-print-bar {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange, #ff6600);
+}
+
+.barcode-page > .label-print-bar {
+  margin-bottom: 0;
+}
+
+.label-print-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.25rem;
+}
+
+.label-print-controls > label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 11rem;
+  font-size: 0.85rem;
+}
+
+.label-print-controls > label.inv-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 2.6rem;
+}
+
+.label-print-controls select,
+.label-print-controls input[type="number"] {
+  min-height: 2.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--ink);
+}
+
+.label-print-controls select {
+  min-width: 16rem;
+}
+
+.label-print-controls input[type="number"] {
+  width: 7rem;
+}
+
+.label-print-controls .label-custom-size {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.label-print-controls .label-custom-size label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.label-print-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  margin-left: auto;
+}
+
+.label-print-bar .warn,
+.label-print-bar .error {
+  margin: 0;
+}
+
+.printer-help {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.printer-help-short {
+  margin: 0;
+}
+
+.printer-help-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.printer-help-details ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+@media (max-width: 720px) {
+  .label-print-controls select,
+  .label-print-controls > label {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .label-print-actions {
+    margin-left: 0;
+  }
 }

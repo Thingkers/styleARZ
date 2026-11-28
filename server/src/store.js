@@ -1,6 +1,6 @@
 const { getPool } = require("./db/pool");
 const { migrate } = require("./db/migrate");
-const { loadAll, saveAll } = require("./db/persist");
+const { loadAll, saveAll, resetSaveCache } = require("./db/persist");
 const { buildSeed, ensureIconCategoryProducts, ensureFakeCatalogMovedToHome } = require("./seed");
 const { ensureCollections, ensureSortOrders } = require("./inventory");
 const { ensureLabelDrafts } = require("./labels");
@@ -58,17 +58,26 @@ function get() {
   return db;
 }
 
+// A save that is queued but not started yet covers every mutation made before it starts,
+// so concurrent callers share it instead of each queueing another write.
+let queued = null;
+
 async function save() {
   if (!db) throw new Error("Database has not been loaded yet.");
-  const snapshot = db;
-  saving = saving
+  if (queued) return queued;
+  queued = saving
     .catch(() => {})
-    .then(() => saveAll(snapshot));
-  return saving;
+    .then(() => {
+      queued = null;
+      return saveAll(db);
+    });
+  saving = queued;
+  return queued;
 }
 
 async function resetWithSeed() {
   db = prepareSeed();
+  resetSaveCache();
   await save();
   return db;
 }

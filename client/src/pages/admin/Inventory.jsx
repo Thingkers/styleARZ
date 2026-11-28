@@ -9,6 +9,8 @@ import {
   CATEGORIES,
   CATEGORY_AUDIENCE_RULES,
   QUICK_SIZES,
+  WAIST_SIZES,
+  sizesForCategory,
   allowedAudiencesForCategory,
   barcodeSrc,
   categoriesForAudience,
@@ -641,6 +643,8 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
   const values = toPayload(form);
   const margin = marginPercent(values.price, values.cost);
   const sizes = selectedSizes(form);
+  const sizeOptions = sizesForCategory(form.category);
+  const waist = sizeOptions === WAIST_SIZES;
 
   function toggleSize(size) {
     if (!multiSize) {
@@ -706,10 +710,14 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
           onChange={(event) => {
             const nextCategory = event.target.value;
             const allowed = allowedAudiencesForCategory(nextCategory, rules);
+            const offered = sizesForCategory(nextCategory);
+            const kept = selectedSizes(form).filter((size) => offered.includes(size));
             onChange({
               ...form,
               category: nextCategory,
               audience: allowed.includes(form.audience) ? form.audience : allowed[0] || form.audience,
+              sizes: kept,
+              size: kept.includes(form.size) ? form.size : kept[0] || "",
             });
           }}
           required
@@ -744,11 +752,15 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
       {multiSize ? (
         <>
           <div className="span-2">
-            <p className="inv-field-label">Sizes (select all that apply)</p>
-            <p className="muted inv-field-help">Each size becomes its own stock row with a unique barcode.</p>
+            <p className="inv-field-label">{waist ? "Waist size (select all that apply)" : "Sizes (select all that apply)"}</p>
+            <p className="muted inv-field-help">
+              {waist
+                ? "Pants use waist inches. Each size becomes its own stock row with a unique barcode."
+                : "Each size becomes its own stock row with a unique barcode."}
+            </p>
           </div>
           <div className="span-2 size-row inv-size-picks" role="group" aria-label="Sizes">
-            {QUICK_SIZES.map((size) => (
+            {sizeOptions.map((size) => (
               <button
                 key={size}
                 type="button"
@@ -788,8 +800,8 @@ function ItemFields({ form, onChange, suggestions, multiSize = false, colourHint
             Size
             <input value={form.size} onChange={set("size")} maxLength={20} list="inv-sizes" autoComplete="off" />
           </label>
-          <div className="span-2 size-row inv-size-picks" role="group" aria-label="Quick sizes">
-            {QUICK_SIZES.map((size) => (
+          <div className="span-2 size-row inv-size-picks" role="group" aria-label={waist ? "Waist sizes" : "Quick sizes"}>
+            {sizeOptions.map((size) => (
               <button
                 key={size}
                 type="button"
@@ -1160,7 +1172,7 @@ function AddSizesPanel({ item, onCreated }) {
         Keeps the same photo, name, colour, price and category. Each size gets its own barcode and stock — no need to re-photograph.
       </p>
       <div className="size-row inv-size-picks" role="group" aria-label="Additional sizes">
-        {QUICK_SIZES.map((size) => (
+        {sizesForCategory(item.category).map((size) => (
           <button
             key={size}
             type="button"

@@ -1,21 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { money, prettyDateTime } from "../../format";
 import { Empty, Loading, Modal } from "../../components/ui";
 import { CATEGORIES, QUICK_SIZES, allowedAudiencesForCategory, barcodeSrc } from "./inventoryUtils";
-
-const PAPER_PRESETS = [
-  { id: "a4-65", label: "A4 · 65-up (38.1×21.2 mm)", kind: "a4", cols: 5, rows: 13, w: 38.1, h: 21.2 },
-  { id: "a4-40", label: "A4 · 40-up (52×29 mm)", kind: "a4", cols: 4, rows: 10, w: 52, h: 29 },
-  { id: "a4-24", label: "A4 · 24-up (70×36 mm)", kind: "a4", cols: 3, rows: 8, w: 70, h: 36 },
-  { id: "t-40x30", label: "Thermal 40×30 mm", kind: "thermal", w: 40, h: 30, shape: "wide" },
-  { id: "t-50x30", label: "Thermal 50×30 mm", kind: "thermal", w: 50, h: 30, shape: "wide" },
-  { id: "t-58x40", label: "Thermal 58×40 mm", kind: "thermal", w: 58, h: 40, shape: "wide" },
-  { id: "t-40x60", label: "Thermal 40×60 mm (narrow hang tag)", kind: "thermal", w: 40, h: 60, shape: "tall" },
-  { id: "t-60x40", label: "Thermal 60×40 mm", kind: "thermal", w: 60, h: 40, shape: "wide" },
-  { id: "t-80x50", label: "Thermal 80×50 mm", kind: "thermal", w: 80, h: 50, shape: "wide" },
-];
+import { labelOrientation, printAlignmentTest, printQuickLabels, resolveLabelPreset } from "./printLabels";
+import { loadPrinterSettings, paperFromJob } from "./printerSettings";
+import LabelPaperPicker from "./LabelPaperPicker";
+import PrinterSetupHelp from "./PrinterSetupHelp";
 
 const SIZE_CHIPS = [...QUICK_SIZES.filter((size) => size !== "One"), "Custom"];
 
@@ -32,22 +24,18 @@ function DraftThumb({ src, label }) {
   return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function LabelFace({ label, shape }) {
+function LabelFace({ label, shape, turned }) {
   return (
-    <article className={`ql-label is-${shape || "wide"}`}>
+    <article className={`ql-label is-${shape || "wide"}${turned ? " is-turned" : ""}`}>
+      <div className="ql-label-face">
       <header>
-        <span className="ql-brand" aria-label="StyleARZ">
-          <span className="ql-brand-mark" aria-hidden="true" />
-          <span className="ql-brand-text">
-            <em>STYLE</em>
-            <b>ARZ</b>
-          </span>
-        </span>
+        <span className="ql-brand-text">STYLEARZ</span>
         <strong>{money(label.price)}</strong>
       </header>
       {label.name ? <p className="ql-label-name">{label.name}</p> : null}
       <p className="ql-label-size">{[label.size, label.barcode].filter(Boolean).join(" · ") || "—"}</p>
       <img className="ql-label-barcode" src={barcodeSrc(label.svg)} alt={`Barcode ${label.barcode}`} />
+      </div>
     </article>
   );
 }
@@ -70,13 +58,26 @@ export default function Labels() {
   const [selected, setSelected] = useState(() => new Set());
   const [rangeAnchor, setRangeAnchor] = useState(null);
   const [labels, setLabels] = useState({});
-  const [presetId, setPresetId] = useState("t-40x60");
+  const [presetId, setPresetId] = useState(() => localStorage.getItem("sa-ql-preset-v2") || "t-38x25");
+  const [orientation, setOrientation] = useState(() => localStorage.getItem("sa-ql-orient") || "landscape");
+  const [topGap, setTopGap] = useState(() => localStorage.getItem("sa-ql-gap") || "2.5");
+  const [shopJob, setShopJob] = useState(null);
+  const [custom, setCustom] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("sa-ql-custom-size") || "null");
+      if (saved && saved.w && saved.h) return { w: String(saved.w), h: String(saved.h) };
+    } catch {
+      /* ignore */
+    }
+    return { w: "38", h: "25" };
+  });
   const [copies, setCopies] = useState("1");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [editForm, setEditForm] = useState(emptyEdit());
+  const sheetRef = useRef(null);
   const [convertItem, setConvertItem] = useState(null);
   const [convertForm, setConvertForm] = useState({
     name: "",
@@ -87,8 +88,32 @@ export default function Labels() {
     listed: false,
   });
 
-  const preset = PAPER_PRESETS.find((entry) => entry.id === presetId) || PAPER_PRESETS[6];
-  const shape = preset.shape || (preset.h > preset.w ? "tall" : "wide");
+  const shopPaper = paperFromJob(shopJob);
+  const preset = presetId === "shop" && shopPaper ? shopPaper : resolveLabelPreset(presetId, custom);
+  const printOrientation = preset.id === "shop" ? "landscape" : orientation;
+  const printGap = preset.id === "shop" ? preset.topGap : topGap;
+  const orient = labelOrientation(preset, printOrientation);
+  useEffect(() => {
+    localStorage.setItem("sa-ql-preset-v2", presetId);
+  }, [presetId]);
+  useEffect(() => {
+    localStorage.setItem("sa-ql-custom-size", JSON.stringify(custom));
+  }, [custom]);
+  useEffect(() => {
+    localStorage.setItem("sa-ql-orient", orientation);
+  }, [orientation]);
+  useEffect(() => {
+    localStorage.setItem("sa-ql-gap", topGap);
+  }, [topGap]);
+  useEffect(() => {
+    loadPrinterSettings()
+      .then((printer) => {
+        setShopJob(printer.label);
+        setPresetId("shop");
+      })
+      .catch(() => {});
+  }, []);
+  const shape = preset.kind === "thermal" ? orient.shape : preset.shape || (preset.h > preset.w ? "tall" : "wide");
 
   function load() {
     const params = new URLSearchParams();
@@ -104,7 +129,13 @@ export default function Labels() {
     load();
   }, [status]);
 
+  const searchedOnce = useRef(false);
   useEffect(() => {
+    // The status effect already loads on mount; only re-query when the search text changes.
+    if (!searchedOnce.current) {
+      searchedOnce.current = true;
+      return undefined;
+    }
     const timer = window.setTimeout(() => {
       load();
     }, 250);
@@ -332,6 +363,50 @@ export default function Labels() {
       {notice && <p className="notice no-print">{notice}</p>}
       {error && !editItem && !convertItem && <p className="error no-print">{error}</p>}
 
+      {!(items.length === 0 && status === "draft") && (
+        <section className="label-print-bar no-print" aria-label="Print settings">
+          <div className="label-print-controls">
+            <LabelPaperPicker
+              presetId={presetId}
+              onPresetChange={setPresetId}
+              custom={custom}
+              onCustomChange={setCustom}
+              preset={preset}
+              orientation={orientation}
+              onOrientationChange={setOrientation}
+              topGap={topGap}
+              onTopGapChange={setTopGap}
+              shopJob={shopJob}
+            />
+            <label>
+              Copies of each label
+              <input
+                type="number"
+                min="1"
+                max="20"
+                inputMode="numeric"
+                value={copies}
+                onChange={(event) => setCopies(event.target.value)}
+              />
+            </label>
+            <div className="label-print-actions">
+              <button
+                type="button"
+                className="btn solid"
+                disabled={!sheet.length}
+                onClick={() => printQuickLabels(sheetRef.current, preset, `StyleARZ Labels (${sheet.length})`, printOrientation, printGap)}
+              >
+                Print {sheet.length || selected.size} label{sheet.length === 1 ? "" : "s"}
+              </button>
+              <button type="button" className="text-link" onClick={() => printAlignmentTest(preset, printOrientation, printGap)}>
+                Print alignment test
+              </button>
+            </div>
+          </div>
+          <PrinterSetupHelp preset={preset} />
+        </section>
+      )}
+
       {items.length === 0 && status === "draft" ? (
         <Empty
           title="No quick labels yet"
@@ -426,30 +501,6 @@ export default function Labels() {
               })}
             </ul>
             <div className="ql-options">
-              <label>
-                Paper / label size
-                <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
-                  {PAPER_PRESETS.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Copies each
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  inputMode="numeric"
-                  value={copies}
-                  onChange={(event) => setCopies(event.target.value)}
-                />
-              </label>
-              <button type="button" className="btn solid" disabled={!sheet.length} onClick={() => window.print()}>
-                Print {sheet.length || selected.size} label{sheet.length === 1 ? "" : "s"}
-              </button>
               <button
                 type="button"
                 className="btn line"
@@ -477,6 +528,7 @@ export default function Labels() {
             ) : (
               <div className={`ql-paper-stage kind-${preset.kind} shape-${shape}`} aria-label="Paper print preview">
                 <div
+                  ref={sheetRef}
                   className="ql-sheet"
                   style={{
                     "--ql-cols": preset.cols || 1,
@@ -485,12 +537,13 @@ export default function Labels() {
                     "--ql-h": preset.h,
                     "--ql-w-mm": `${preset.w}mm`,
                     "--ql-h-mm": `${preset.h}mm`,
+                    "--ql-top": `${Math.min(6, Math.max(0, Number(printGap) || 0))}mm`,
                   }}
                   data-kind={preset.kind}
                   data-shape={shape}
                 >
                   {sheet.map(({ key, label }) => (
-                    <LabelFace key={key} label={label} shape={shape} />
+                    <LabelFace key={key} label={label} shape={shape} turned={orient.turned} />
                   ))}
                 </div>
               </div>
